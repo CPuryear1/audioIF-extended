@@ -108,11 +108,14 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
     // Speaks the text and starts voice recognition once TTS finishes (or is interrupted).
-    private void speakThenListen(String text) {
+    // Only the first utterance of a new game response flushes the queue; follow-up prompts
+    // are queued so they play after whatever is already speaking instead of cutting it off.
+    private void speakThenListen(String text, boolean startsNewResponse) {
         stopVoiceInput();
         String utteranceId = "utterance-" + (++utteranceCounter);
         pendingUtteranceId = utteranceId;
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId);
+        int queueMode = startsNewResponse ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
+        tts.speak(text, queueMode, null, utteranceId);
     }
 
     private void onUtteranceFinished(final String utteranceId) {
@@ -162,10 +165,10 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             Log.w("SpeechRecognizer", "Recognition error: " + error);
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                 tts.speak("Microphone permission is required for voice commands.",
-                        TextToSpeech.QUEUE_FLUSH, null, "permission-error");
+                        TextToSpeech.QUEUE_ADD, null, "permission-error");
                 return;
             }
-            speakThenListen("Sorry, I didn't catch that. Please try again.");
+            speakThenListen("Sorry, I didn't catch that. Please try again.", false);
         }
 
         @Override
@@ -176,7 +179,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             isListening = false;
             ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches == null || matches.isEmpty()) {
-                speakThenListen("Sorry, I didn't catch that. Please try again.");
+                speakThenListen("Sorry, I didn't catch that. Please try again.", false);
                 return;
             }
             commandField.setText(applyCompassAliases(matches.get(0)));
@@ -281,7 +284,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             String initialText = getBufferText(screenModel);
             if(initialText.length() > 1){
                 storyField.setText(initialText);
-                speakThenListen(storyField.getText().toString());
+                speakThenListen(storyField.getText().toString(), true);
             }
             else{
                 commandField.setText(" ");
@@ -394,7 +397,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             storyField.setText(currentText);
             commandField.setText("");
             commandField.setVisibility(View.GONE);
-            speakThenListen(storyField.getText().toString());
+            speakThenListen(storyField.getText().toString(), true);
         }
         else{
             commandField.setText(" ");
