@@ -50,7 +50,33 @@ The core of this application uses the ZMPP interpreter project: https://sourcefo
 
 ## Changes in this fork
 - Audio mode uses an inline `SpeechRecognizer` instead of the Google speech popup. Listening starts when text-to-speech finishes (via `UtteranceProgressListener`), and recognition errors trigger a spoken retry prompt.
-- Build migrated to Gradle 9.6, Android Gradle Plugin 9.4.1 and AndroidX (compileSdk 36, targetSdk 33, minSdk 24).
+- Build toolchain upgraded to Android Gradle Plugin (AGP) 9.4.1 (see below).
+
+### Android Gradle Plugin upgrade
+The original project used AGP 3.2.0, which can't parse the manifest `<queries>` element. Android 11+ needs that element to let the app find the speech recognition service (`android.speech.RecognitionService`), so the build was upgraded to the latest stable AGP:
+
+| | Before | After |
+|---|---|---|
+| Android Gradle Plugin | 3.2.0 | 9.4.1 |
+| Gradle wrapper | 4.6 | 9.6.0 |
+| JDK | 8 | 17+ |
+| compileSdk | 33 | 36 |
+| targetSdk | 33 | 33 (unchanged, so runtime behavior stays the same) |
+| minSdk | 24 | 24 |
+| Build tools | 28.0.2 (pinned) | 36.0.0 (AGP default) |
+| Repositories | `jcenter()`, `google()` | `google()`, `mavenCentral()` |
+
+Changes required by the upgrade:
+- **Support Library → AndroidX** (AGP 9 no longer supports the old Support Library or Jetifier):
+  - `com.android.support:appcompat-v7:27.1.1` → `androidx.appcompat:appcompat:1.8.0`
+  - `com.android.support.constraint:constraint-layout:1.0.2` → `androidx.constraintlayout:constraintlayout:2.2.2`
+  - `espresso-core:2.2.2` → `androidx.test.espresso:espresso-core:3.7.0`; `junit:4.12` → `4.13.2`
+  - Java imports (`android.support.v4`/`v7` → `androidx.core`/`androidx.appcompat`) and layout XML tags (`android.support.constraint.ConstraintLayout` → `androidx.constraintlayout.widget.ConstraintLayout`) were updated to match.
+  - `android.useAndroidX=true` is set in the new `gradle.properties`.
+- **Dependency configurations:** `compile`/`testCompile`/`androidTestCompile` → `implementation`/`testImplementation`/`androidTestImplementation`.
+- **Namespaces:** the `package` attribute was removed from both `AndroidManifest.xml` files and replaced by `namespace` in each module's `build.gradle` (`org.redrossistudios.audioif`, `org.zmpp`).
+- **DSL updates:** `compileSdkVersion`/`minSdkVersion`/`targetSdkVersion` → `compileSdk`/`minSdk`/`targetSdk`; `buildToolsVersion` and the empty `productFlavors` block were removed; `targetSdk`, `versionCode` and `versionName` were removed from the `zmpp` library module because AGP no longer accepts them for libraries.
+- **ProGuard:** `proguard-android.txt` → `proguard-android-optimize.txt` (AGP 9 dropped the old default file). Minification is still disabled.
 
 ## Building
 Requirements: JDK 17 or newer, and an Android SDK with platform 36 and build-tools 36.0.0. Set `ANDROID_HOME` or create a `local.properties` file containing `sdk.dir`.
