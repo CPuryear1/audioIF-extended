@@ -1,4 +1,6 @@
-# audioIF
+# audioIF-extended
+An extended fork of [drossimarinho/audioIF](https://github.com/drossimarinho/audioIF).
+
 audio IF - Audio Interactive Fiction - Play story games in a dynamic listen-talk gameplay - Android
 
 Google Play link: https://play.google.com/store/apps/details?id=org.redrossistudios.audioif
@@ -17,7 +19,9 @@ I tried to make the app easy to use for blind people.
 The "start audio mode" button is really big in the middle of the screen, so after you open the app, if you press somewhere in the middle of your screen the audio mode should start.
 On the audio mode, the app scans for the supported game files on your device, and speaks out loud the name of each game file with a number identifier. After the enumeration of the games, there will be a beep, then you should say the game number, it will load that game.
 When it's time for the player to speak, the app makes a beep sound. You can interrupt the story speech by clicking anywhere in the middle of screen, click anywhere on the screen also to start the speech recognition in case it is stopped.
-Sometimes the speech recognition fails to understand what is said, and nothing happens, in that case you have to press in google speech button exactly the middle or dismiss the popup clicking twice somewhere little above the android native back button. (Unfortunately I couldn't solve this problem yet)
+Speech recognition runs inline, without a popup: the app starts listening as soon as it finishes reading the story text. If your speech isn't understood, the app says "Sorry, I didn't catch that. Please try again." and listens again. Saying a diagonal direction such as "north west" or "southwest" is converted to its short command (NW, NE, SE, SW). Long-press the screen to show the keyboard and type a command instead; this pauses voice input.
+
+The app asks for microphone permission the first time audio mode starts. Voice commands don't work without it.
 
 If there is any problem or recommendation please let me know.
 
@@ -43,3 +47,24 @@ Supported formats: Z-Machine games<br />
 
 
 The core of this application uses the ZMPP interpreter project: https://sourceforge.net/projects/zmpp/
+
+## Changes in this fork
+- Audio mode uses an inline `SpeechRecognizer` instead of the Google speech popup. Listening starts when text-to-speech finishes (via `UtteranceProgressListener`), and recognition errors trigger a spoken retry prompt.
+- Build migrated to Gradle 9.6, Android Gradle Plugin 9.4.1 and AndroidX (compileSdk 36, targetSdk 33, minSdk 24).
+
+## Building
+Requirements: JDK 17 or newer, and an Android SDK with platform 36 and build-tools 36.0.0. Set `ANDROID_HOME` or create a `local.properties` file containing `sdk.dir`.
+
+```
+./gradlew assembleDebug
+```
+
+The APK is written to `audioif/build/outputs/apk/debug/`.
+
+To pull in changes from the original project:
+
+```
+git remote add upstream https://github.com/drossimarinho/audioIF.git
+git fetch upstream
+git merge upstream/master
+```

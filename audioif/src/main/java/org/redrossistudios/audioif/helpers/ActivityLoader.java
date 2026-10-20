@@ -1,7 +1,7 @@
 package org.redrossistudios.audioif.helpers;
 
 import android.content.Intent;
-import android.support.v7.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatActivity;
 
 public class ActivityLoader {
     public static void load(AppCompatActivity origin ,Class<?> activityToLoad){
