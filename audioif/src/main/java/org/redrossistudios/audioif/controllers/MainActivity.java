@@ -25,6 +25,7 @@ import android.widget.TextView;
 
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.Alert;
+import org.redrossistudios.audioif.helpers.CommandNormalizer;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
@@ -44,9 +45,7 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Map;
 
 public class MainActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
 
@@ -59,17 +58,6 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private EditText commandField;
     private Button button;
     private static final int REQ_CODE_RECORD_AUDIO = 101;
-    private static final Map<String, String> COMPASS_ALIASES = new LinkedHashMap<>();
-    static {
-        COMPASS_ALIASES.put("north west", "NW");
-        COMPASS_ALIASES.put("northwest", "NW");
-        COMPASS_ALIASES.put("north east", "NE");
-        COMPASS_ALIASES.put("northeast", "NE");
-        COMPASS_ALIASES.put("south east", "SE");
-        COMPASS_ALIASES.put("southeast", "SE");
-        COMPASS_ALIASES.put("south west", "SW");
-        COMPASS_ALIASES.put("southwest", "SW");
-    }
     private SpeechRecognizer speechRecognizer;
     private boolean isListening = false;
     private int utteranceCounter = 0;
@@ -130,15 +118,17 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         });
     }
 
-    private static String applyCompassAliases(String voiceInputText) {
-        String lower = voiceInputText.toLowerCase(Locale.ROOT);
-        for (Map.Entry<String, String> alias : COMPASS_ALIASES.entrySet()) {
-            if (lower.contains(alias.getKey())) {
-                return alias.getValue();
+    private final CommandNormalizer.Dictionary gameDictionary = new CommandNormalizer.Dictionary() {
+        @Override
+        public boolean contains(String word) {
+            try {
+                return executionControl.getMachine().lookupToken(0, word) != 0;
+            } catch (Exception e) {
+                Log.w("CommandNormalizer", "Dictionary lookup failed for '" + word + "'", e);
+                return false;
             }
         }
-        return voiceInputText;
-    }
+    };
 
     private final RecognitionListener recognitionListener = new RecognitionListener() {
         @Override
@@ -182,7 +172,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 speakThenListen("Sorry, I didn't catch that. Please try again.", false);
                 return;
             }
-            commandField.setText(applyCompassAliases(matches.get(0)));
+            commandField.setText(CommandNormalizer.normalize(matches.get(0), gameDictionary));
             handleButtonClick();
         }
 

@@ -19,7 +19,7 @@ I tried to make the app easy to use for blind people.
 The "start audio mode" button is really big in the middle of the screen, so after you open the app, if you press somewhere in the middle of your screen the audio mode should start.
 On the audio mode, the app scans for the supported game files on your device, and speaks out loud the name of each game file with a number identifier. After the enumeration of the games, there will be a beep, then you should say the game number, it will load that game.
 When it's time for the player to speak, the app makes a beep sound. You can interrupt the story speech by clicking anywhere in the middle of screen, click anywhere on the screen also to start the speech recognition in case it is stopped.
-Speech recognition runs inline, without a popup: the app starts listening as soon as it finishes reading the story text. If your speech isn't understood, the app says "Sorry, I didn't catch that. Please try again." and listens again. Saying a diagonal direction such as "north west" or "southwest" is converted to its short command (NW, NE, SE, SW). Long-press the screen to show the keyboard and type a command instead; this pauses voice input.
+Speech recognition runs inline, without a popup: the app starts listening as soon as it finishes reading the story text. If your speech isn't understood, the app says "Sorry, I didn't catch that. Please try again." and listens again. Spoken directions and common verbs are converted to short commands: "north west" or "go north west" becomes NW, "up" becomes U, "examine lamp" becomes "x lamp", and so on. A conversion is only used if the game recognizes the short form. Long-press the screen to show the keyboard and type a command instead; this pauses voice input.
 
 The app asks for microphone permission the first time audio mode starts. Voice commands don't work without it.
 
@@ -50,6 +50,7 @@ The core of this application uses the ZMPP interpreter project: https://sourcefo
 
 ## Changes in this fork
 - Audio mode uses an inline `SpeechRecognizer` instead of the Google speech popup. Listening starts when text-to-speech finishes (via `UtteranceProgressListener`), and recognition errors trigger a spoken retry prompt.
+- Spoken commands are normalized by `CommandNormalizer` (`audioif/src/main/java/org/redrossistudios/audioif/helpers/CommandNormalizer.java`). It maps the eight compass directions, up/down (with or without a leading "go"), and the verbs examine / look at → `x`, inventory → `i`, wait → `z`, again → `g`. Phrases only match whole words at the start of the utterance, and the longest match wins. A mapping is skipped if the loaded game's dictionary doesn't contain the short form. To add a mapping, add a `put("spoken phrase", "command")` line to its static block.
 - Build toolchain upgraded to Android Gradle Plugin (AGP) 9.4.1 (see below).
 
 ### Android Gradle Plugin upgrade
