@@ -1,12 +1,18 @@
 package org.redrossistudios.audioif.controllers;
 
+import android.Manifest;
 import android.app.ProgressDialog;
-import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
-import android.support.v7.app.AppCompatActivity;
+import android.speech.tts.UtteranceProgressListener;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -38,7 +44,9 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
 
@@ -50,7 +58,22 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private TextView storyField;
     private EditText commandField;
     private Button button;
-    private static final int REQ_CODE_SPEECH_INPUT = 100;
+    private static final int REQ_CODE_RECORD_AUDIO = 101;
+    private static final Map<String, String> COMPASS_ALIASES = new LinkedHashMap<>();
+    static {
+        COMPASS_ALIASES.put("north west", "NW");
+        COMPASS_ALIASES.put("northwest", "NW");
+        COMPASS_ALIASES.put("north east", "NE");
+        COMPASS_ALIASES.put("northeast", "NE");
+        COMPASS_ALIASES.put("south east", "SE");
+        COMPASS_ALIASES.put("southeast", "SE");
+        COMPASS_ALIASES.put("south west", "SW");
+        COMPASS_ALIASES.put("southwest", "SW");
+    }
+    private SpeechRecognizer speechRecognizer;
+    private boolean isListening = false;
+    private int utteranceCounter = 0;
+    private volatile String pendingUtteranceId;
     private TextToSpeech tts;
     private InputStream storyIs;
     private FileScanner fileScanner;
@@ -62,80 +85,131 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private MainActivity activity;
 
     private void startVoiceInput() {
-        Runnable r = new Runnable() {
-            public void run() {
-                while(tts.isSpeaking()){
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }
-                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
-                intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "What do you want to do next?");
-                isFileScannerInput = false;
-                try {
-                    startActivityForResult(intent, REQ_CODE_SPEECH_INPUT);
-                } catch (ActivityNotFoundException a) {
-
-                }
-            }};
-        Thread t = new Thread(r);
-        t.start();
+        if (speechRecognizer == null || isFinishing()) {
+            return;
+        }
+        isFileScannerInput = false;
+        if (isListening) {
+            speechRecognizer.cancel();
+        }
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag());
+        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+        isListening = true;
+        speechRecognizer.startListening(intent);
     }
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
 
-        switch (requestCode) {
-            case REQ_CODE_SPEECH_INPUT: {
-                if (resultCode == RESULT_OK && null != data) {
-//                    if(isFileScannerInput){
-//                        ArrayList<String> result = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-//                        String voiceInputText = result.get(0);
-//                        try
-//                        {
-//                            int chosenNumber = Integer.parseInt(NumberReader.replaceNumbers(voiceInputText));
-//                            if(chosenNumber == 0){
-//                                tts.speak("Invalid story number, try again.", TextToSpeech.QUEUE_FLUSH, null);
-//                                fileScanner.startVoiceInput();
-//                            }
-//                            else{
-//                                int indexNumber = chosenNumber - 1;
-//                                fileScanner.list.performItemClick(fileScanner.list.getChildAt(indexNumber), indexNumber, fileScanner.list.getItemIdAtPosition(indexNumber));
-//                            }
-//                        } catch (NumberFormatException e)
-//                        {
-//                            tts.speak("Number not recognized, try again.", TextToSpeech.QUEUE_FLUSH, null);
-//                            fileScanner.startVoiceInput();
-//                        }
-//                    }
-                    //else{
-                        ArrayList<String> result = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-                        String voiceInputText = result.get(0);
-                        if(voiceInputText.contains("North West")){
-                            voiceInputText = "NW";
-                        }
-                        else if(voiceInputText.contains("North East")){
-                            voiceInputText = "NE";
-                        }
-                        else if(voiceInputText.contains("South East")){
-                            voiceInputText = "SE";
-                        }
-                        else if(voiceInputText.contains("South West")){
-                            voiceInputText = "SW";
-                        }
-                        commandField.setText(voiceInputText);
-                        handleButtonClick();
-                    //}
-                }
-                break;
-            }
-
+    private void stopVoiceInput() {
+        if (speechRecognizer != null && isListening) {
+            isListening = false;
+            speechRecognizer.cancel();
         }
     }
+
+    // Speaks the text and starts voice recognition once TTS finishes (or is interrupted).
+    private void speakThenListen(String text) {
+        stopVoiceInput();
+        String utteranceId = "utterance-" + (++utteranceCounter);
+        pendingUtteranceId = utteranceId;
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId);
+    }
+
+    private void onUtteranceFinished(final String utteranceId) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (utteranceId != null && utteranceId.equals(pendingUtteranceId)) {
+                    pendingUtteranceId = null;
+                    startVoiceInput();
+                }
+            }
+        });
+    }
+
+    private static String applyCompassAliases(String voiceInputText) {
+        String lower = voiceInputText.toLowerCase(Locale.ROOT);
+        for (Map.Entry<String, String> alias : COMPASS_ALIASES.entrySet()) {
+            if (lower.contains(alias.getKey())) {
+                return alias.getValue();
+            }
+        }
+        return voiceInputText;
+    }
+
+    private final RecognitionListener recognitionListener = new RecognitionListener() {
+        @Override
+        public void onReadyForSpeech(Bundle params) { }
+
+        @Override
+        public void onBeginningOfSpeech() { }
+
+        @Override
+        public void onRmsChanged(float rmsdB) { }
+
+        @Override
+        public void onBufferReceived(byte[] buffer) { }
+
+        @Override
+        public void onEndOfSpeech() { }
+
+        @Override
+        public void onError(int error) {
+            if (!isListening || isFinishing()) {
+                return;
+            }
+            isListening = false;
+            Log.w("SpeechRecognizer", "Recognition error: " + error);
+            if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                tts.speak("Microphone permission is required for voice commands.",
+                        TextToSpeech.QUEUE_FLUSH, null, "permission-error");
+                return;
+            }
+            speakThenListen("Sorry, I didn't catch that. Please try again.");
+        }
+
+        @Override
+        public void onResults(Bundle results) {
+            if (!isListening) {
+                return;
+            }
+            isListening = false;
+            ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+            if (matches == null || matches.isEmpty()) {
+                speakThenListen("Sorry, I didn't catch that. Please try again.");
+                return;
+            }
+            commandField.setText(applyCompassAliases(matches.get(0)));
+            handleButtonClick();
+        }
+
+        @Override
+        public void onPartialResults(Bundle partialResults) { }
+
+        @Override
+        public void onEvent(int eventType, Bundle params) { }
+    };
+
+    private final UtteranceProgressListener utteranceProgressListener = new UtteranceProgressListener() {
+        @Override
+        public void onStart(String utteranceId) { }
+
+        @Override
+        public void onDone(String utteranceId) {
+            onUtteranceFinished(utteranceId);
+        }
+
+        @Override
+        public void onStop(String utteranceId, boolean interrupted) {
+            onUtteranceFinished(utteranceId);
+        }
+
+        @Override
+        public void onError(String utteranceId) {
+            onUtteranceFinished(utteranceId);
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         activity = this;
@@ -150,6 +224,19 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 "Loading. Please wait...", true);
 
         tts = new TextToSpeech(this, this);
+        tts.setOnUtteranceProgressListener(utteranceProgressListener);
+
+        if (SpeechRecognizer.isRecognitionAvailable(this)) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+            speechRecognizer.setRecognitionListener(recognitionListener);
+        } else {
+            Log.e("SpeechRecognizer", "Speech recognition is not available on this device");
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.RECORD_AUDIO}, REQ_CODE_RECORD_AUDIO);
+        }
         storyFileTypeChecker = new StoryFileTypeChecker();
     }
 
@@ -185,6 +272,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             storyField.setOnLongClickListener(new View.OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View view) {
+                    stopVoiceInput();
                     commandField.setVisibility(View.VISIBLE);
                     showKeyboard(activity, commandField);
                     return true;
@@ -193,8 +281,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             String initialText = getBufferText(screenModel);
             if(initialText.length() > 1){
                 storyField.setText(initialText);
-                tts.speak(storyField.getText().toString(), TextToSpeech.QUEUE_FLUSH, null);
-                startVoiceInput();
+                speakThenListen(storyField.getText().toString());
             }
             else{
                 commandField.setText(" ");
@@ -208,6 +295,11 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
 
     @Override
     public void onDestroy() {
+        if (speechRecognizer != null) {
+            isListening = false;
+            speechRecognizer.destroy();
+            speechRecognizer = null;
+        }
         // Don't forget to shutdown tts!
         if (tts != null) {
             tts.stop();
@@ -302,8 +394,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             storyField.setText(currentText);
             commandField.setText("");
             commandField.setVisibility(View.GONE);
-            tts.speak(storyField.getText().toString(), TextToSpeech.QUEUE_FLUSH, null);
-            startVoiceInput();
+            speakThenListen(storyField.getText().toString());
         }
         else{
             commandField.setText(" ");
