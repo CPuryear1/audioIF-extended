@@ -65,6 +65,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private static final int REQ_CODE_RECORD_AUDIO = 101;
     private SpeechRecognizer speechRecognizer;
     private boolean isListening = false;
+    private TextView statusView;
     private int utteranceCounter = 0;
     private volatile String pendingUtteranceId;
     private List<String> dictionaryWords;
@@ -93,6 +94,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag());
         intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
         isListening = true;
+        setStatus("Listening\u2026 say a command");
         speechRecognizer.startListening(intent);
     }
 
@@ -100,6 +102,13 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         if (speechRecognizer != null && isListening) {
             isListening = false;
             speechRecognizer.cancel();
+            setStatus("Paused \u2014 tap the story to listen");
+        }
+    }
+
+    private void setStatus(String text) {
+        if (statusView != null) {
+            statusView.setText(text);
         }
     }
 
@@ -111,6 +120,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         String utteranceId = "utterance-" + (++utteranceCounter);
         pendingUtteranceId = utteranceId;
         int queueMode = startsNewResponse ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
+        setStatus("Reading\u2026 tap to skip");
         tts.speak(text, queueMode, null, utteranceId);
     }
 
@@ -162,6 +172,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             isListening = false;
             Log.w("SpeechRecognizer", "Recognition error: " + error);
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                setStatus("Microphone permission needed");
                 tts.speak("Microphone permission is required for voice commands.",
                         TextToSpeech.QUEUE_ADD, null, "permission-error");
                 return;
@@ -227,6 +238,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         EdgeToEdge.applySystemBarPadding(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         storyField = (TextView) findViewById(R.id.textView);
+        statusView = (TextView) findViewById(R.id.statusView);
+        setStatus("Loading\u2026");
         commandField = (EditText) findViewById(R.id.editText);
         button = (Button) findViewById(R.id.button);
         progressDialog = ProgressDialog.show(MainActivity.this, "",

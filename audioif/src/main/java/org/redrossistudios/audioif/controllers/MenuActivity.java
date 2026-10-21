@@ -74,9 +74,26 @@ public class MenuActivity extends AppCompatActivity {
         setContentView(R.layout.activity_menu);
         EdgeToEdge.applySystemBarPadding(this);
         ActionBar actionBar = getSupportActionBar();
-        actionBar.setDisplayShowHomeEnabled(true);
-        actionBar.setIcon(R.mipmap.ic_launcher);
-        Button audioButton = (Button)findViewById(R.id.audioButton);
+        if (actionBar != null) {
+            actionBar.hide();
+        }
+        final Button audioButton = (Button)findViewById(R.id.audioButton);
+        // Keep the headphones icon and label together in the middle of the tall button.
+        audioButton.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
+                if (audioButton.getLayout() == null || audioButton.getCompoundDrawables()[1] == null) {
+                    return;
+                }
+                int content = audioButton.getCompoundDrawables()[1].getIntrinsicHeight()
+                        + audioButton.getCompoundDrawablePadding() + audioButton.getLayout().getHeight();
+                int top = Math.max(0, (b - t - content) / 2);
+                if (top != audioButton.getPaddingTop()) {
+                    audioButton.setPadding(audioButton.getPaddingLeft(), top,
+                            audioButton.getPaddingRight(), top);
+                }
+            }
+        });
         Button textButton = (Button)findViewById(R.id.textButton);
         Button linkButton = (Button)findViewById(R.id.linkButton);
         Button downloadButton = (Button)findViewById(R.id.downloadButton);

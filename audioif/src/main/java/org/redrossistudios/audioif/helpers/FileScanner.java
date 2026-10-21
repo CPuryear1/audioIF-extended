@@ -3,14 +3,19 @@ package org.redrossistudios.audioif.helpers;
 import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.content.DialogInterface;
+import android.graphics.Typeface;
 import android.os.Environment;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
+import org.redrossistudios.audioif.R;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import java.io.File;
@@ -104,19 +109,38 @@ public class FileScanner {
                 }
             }
         });
-        dialog.setContentView(list);
-        dialog.getWindow().setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(activity);
+        float density = activity.getResources().getDisplayMetrics().density;
+        int pad = (int) (20 * density);
+        title.setText("Choose a story");
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setTextSize(22);
+        title.setTextColor(ContextCompat.getColor(activity, R.color.amber));
+        title.setPadding(pad, pad, pad, pad / 2);
+        content.addView(title);
+        content.addView(list);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(content);
+        dialog.getWindow().setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
 
         ArrayList<String> fileList = new ArrayList<>();
         for (String filePath : filePathList) {
-            fileList.add(new File(filePath).getName());
+            String name = new File(filePath).getName();
+            int dot = name.lastIndexOf('.');
+            fileList.add(dot > 0 ? name.substring(0, dot) : name);
         }
         list.setAdapter(new ArrayAdapter<String>(activity,
                 android.R.layout.simple_list_item_1, fileList) {
             @Override
             public View getView(int pos, View view, ViewGroup parent) {
                 view = super.getView(pos, view, parent);
-                ((TextView) view).setSingleLine(true);
+                TextView row = (TextView) view;
+                row.setSingleLine(true);
+                row.setTypeface(Typeface.SERIF);
+                row.setTextSize(20);
+                row.setPadding(pad, row.getPaddingTop(), pad, row.getPaddingBottom());
                 return view;
             }
         });

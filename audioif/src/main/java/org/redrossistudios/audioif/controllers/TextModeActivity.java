@@ -1,7 +1,13 @@
 package org.redrossistudios.audioif.controllers;
 
 import android.app.ProgressDialog;
+import android.graphics.Typeface;
 import android.os.Handler;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
+import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -175,7 +181,8 @@ public class TextModeActivity extends AppCompatActivity {
         CommandInput.Result resolved = CommandInput.resolve(typed, pendingSuggestions, gameDictionary);
         pendingSuggestions = null;
         if (resolved.reply != null) {
-            storyField.append("\n\n >" + typed + "\n\n" + resolved.reply);
+            appendCommandEcho(typed);
+            storyField.append("\n\n" + resolved.reply);
             footer.requestFocus();
             commandField.setText("");
             return;
@@ -190,7 +197,8 @@ public class TextModeActivity extends AppCompatActivity {
         if(currentText.length() > 1){
             // Show what was actually sent when the normalizer or a suggestion changed it.
             String echo = typed.trim().equalsIgnoreCase(command.trim()) ? typed : typed + "  [" + command + "]";
-            storyField.append("\n\n >" + echo + "\n\n" + currentText);
+            appendCommandEcho(echo);
+            storyField.append("\n\n" + currentText);
             offerSuggestionsIfRejected(command, currentText);
             footer.requestFocus();
             commandField.setText("");
@@ -198,6 +206,14 @@ public class TextModeActivity extends AppCompatActivity {
         else{
             runCommand(" ", " ");
         }
+    }
+
+    private void appendCommandEcho(String echo) {
+        SpannableString line = new SpannableString("\n\n> " + echo);
+        line.setSpan(new ForegroundColorSpan(ContextCompat.getColor(this, R.color.amber)),
+                0, line.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        line.setSpan(new StyleSpan(Typeface.BOLD), 0, line.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        storyField.append(line);
     }
 
     // Same rejection handling as audio mode, shown as text; type a number to choose.

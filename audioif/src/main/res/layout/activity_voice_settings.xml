@@ -3,12 +3,14 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="20dp">
 
     <TextView
         android:id="@+id/rateLabel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:fontFamily="serif"
+        android:textColor="@color/parchment"
         android:textSize="18sp" />
 
     <SeekBar
@@ -23,6 +25,8 @@
         android:id="@+id/pitchLabel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:fontFamily="serif"
+        android:textColor="@color/parchment"
         android:textSize="18sp" />
 
     <SeekBar
@@ -50,6 +54,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:layout_marginStart="12dp"
             android:text="Reset to default" />
     </LinearLayout>
 
@@ -59,6 +64,8 @@
         android:paddingTop="16dp"
         android:paddingBottom="8dp"
         android:text="Voice (tap to hear it)"
+        android:fontFamily="serif"
+        android:textColor="@color/parchment"
         android:textSize="18sp" />
 
     <ListView
@@ -66,5 +73,7 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:choiceMode="singleChoice" />
+        android:choiceMode="singleChoice"
+        android:divider="@color/inkBorder"
+        android:dividerHeight="1dp" />
 </LinearLayout>

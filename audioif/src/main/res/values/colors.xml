@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#3F51B5</color>
-    <color name="colorPrimaryDark">#303F9F</color>
-    <color name="colorAccent">#FF4081</color>
+    <!-- Classic adventure palette: ink background, parchment text, lantern-amber accents. -->
+    <color name="ink">#17120E</color>
+    <color name="inkRaised">#241C15</color>
+    <color name="inkBorder">#4A3B2A</color>
+    <color name="parchment">#EBDDBE</color>
+    <color name="parchmentMuted">#B3A07F</color>
+    <color name="amber">#E3A645</color>
+    <color name="amberDark">#B97E22</color>
+    <color name="amberRipple">#40E3A645</color>
+
+    <color name="colorPrimary">@color/inkRaised</color>
+    <color name="colorPrimaryDark">@color/ink</color>
+    <color name="colorAccent">@color/amber</color>
 </resources>

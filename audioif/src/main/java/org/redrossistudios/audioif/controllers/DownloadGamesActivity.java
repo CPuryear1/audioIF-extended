@@ -50,6 +50,7 @@ public class DownloadGamesActivity extends AppCompatActivity {
                 } else {
                     status = "";
                 }
+                row.setTypeface(android.graphics.Typeface.SERIF);
                 row.setText(game.title + status);
                 return row;
             }
