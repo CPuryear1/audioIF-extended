@@ -17,6 +17,7 @@ import android.view.View;
 import android.widget.Button;
 
 import org.redrossistudios.audioif.R;
+import org.redrossistudios.audioif.helpers.GameLibrary;
 
 public class MenuActivity extends AppCompatActivity {
 
@@ -50,6 +51,7 @@ public class MenuActivity extends AppCompatActivity {
         }
 
 
+        GameLibrary.installBundledGames(this);
         setContentView(R.layout.activity_menu);
         ActionBar actionBar = getSupportActionBar();
         actionBar.setDisplayShowHomeEnabled(true);
@@ -57,6 +59,13 @@ public class MenuActivity extends AppCompatActivity {
         Button audioButton = (Button)findViewById(R.id.audioButton);
         Button textButton = (Button)findViewById(R.id.textButton);
         Button linkButton = (Button)findViewById(R.id.linkButton);
+        Button downloadButton = (Button)findViewById(R.id.downloadButton);
+        downloadButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                loadNewActivity(DownloadGamesActivity.class);
+            }
+        });
         audioButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {

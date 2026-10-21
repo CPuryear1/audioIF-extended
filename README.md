@@ -27,6 +27,10 @@ If there is any problem or recommendation please let me know.
 
 Text to speech configuration: It gets the default configuration from your phone, so if you want to change speed of speech or language you can do it on android settings, language and input, text to speech output.
 
+Included and downloadable games:
+Zork I, Zork II and Zork III come with the app, so you can start playing right away. They appear in the game list in both audio and text mode.
+Tap "Download Infocom games" on the menu to download more games: the other text-only Infocom classics (Planetfall, Enchanter, Trinity, A Mind Forever Voyaging and more) and Colossal Cave Adventure. Tap a game to download it; it then appears in the game list.
+
 How to easily find games:
 If you click on the top button of the app "Browse supported games", it will bring you to the website https://ifarchive.org/indexes/if-archiveXgamesXzcode.html where the game files are directly available for download. Once the game file is downloaded, you just need to go back to the app and start audio or text mode, and the file scanner is going to find your downloaded games.
 
@@ -52,6 +56,13 @@ The core of this application uses the ZMPP interpreter project: https://sourcefo
 - Audio mode uses an inline `SpeechRecognizer` instead of the Google speech popup. Listening starts when text-to-speech finishes (via `UtteranceProgressListener`), and recognition errors trigger a spoken retry prompt.
 - Spoken commands are normalized by `CommandNormalizer` (`audioif/src/main/java/org/redrossistudios/audioif/helpers/CommandNormalizer.java`). It maps the eight compass directions, up/down (with or without a leading "go"), and the verbs examine / look at → `x`, inventory → `i`, wait → `z`, again → `g`. Phrases only match whole words at the start of the utterance, and the longest match wins. A mapping is skipped if the loaded game's dictionary doesn't contain the short form. To add a mapping, add a `put("spoken phrase", "command")` line to its static block.
 - Rejected commands get spoken suggestions from `CommandSuggester` (`audioif/src/main/java/org/redrossistudios/audioif/helpers/CommandSuggester.java`). After each command, the game's response is checked against a list of rejection phrases (add more with `CommandSuggester.addRejectionPhrase`). If it matches, the unknown words in the command (or, if every word is known, the object words) are replaced with dictionary words within a small edit distance (typos and swapped letters count as 1). Results are ranked by distance, then shared prefix, and the top three are read out as numbered options. The dictionary is read through new ZMPP methods `Dictionary.getEntryWord` and `Machine.getDictionaryWords`. Z-Machine dictionaries store only the first 6 (v1-3) or 9 (v4+) letters of each word, so a suggestion may be a shortened word; the game still accepts it.
+- Infocom games. Versions come from the [Obsessively Complete Infocom Catalog](https://eblong.com/infocom/), using the "Text Adventure Masterpieces of Infocom" (1996) release of each game.
+  - Zork I, II and III are bundled in `audioif/src/main/assets/games/`. Microsoft released them under the MIT License in November 2025; the license is in `LICENSE-zork.txt` next to them. On start, `GameLibrary` copies them into the app's private `games` folder, which `FileScanner` lists before the device-wide scan.
+  - The other 27 Masterpieces games are still copyrighted by Microsoft, so they're not stored in this repository. The "Download Infocom games" screen (`DownloadGamesActivity`) downloads them from eblong.com on request, after a one-time notice. `GameDownloader` checks each file against the catalog MD5 before saving it.
+  - Colossal Cave Adventure is downloadable too: Graham Nelson's Inform port (`Advent.z5`, Release 9 / 060321) from the [IF Archive](https://ifarchive.org/if-archive/games/zcode/Advent.z5). It's the standard 350-point version, and its parser accepts full sentences, which suits voice input.
+  - Not included: the graphical `.z6` games (Arthur, Journey, Zork Zero), and Hitchhiker's Guide and Shogun, which aren't on Masterpieces. Where Masterpieces had separate Mac and PC files, the PC file is used; Sherlock is the PC no-sound build.
+  - The game list is in `InfocomCatalog`; add a `Game` entry (title, file name, MD5) to offer another download.
+  - Saved games now go next to the game file, with its extension replaced by `.sav`. The old code cut the path at the first dot, which broke for paths containing dots such as the app's private folder.
 - Build toolchain upgraded to Android Gradle Plugin (AGP) 9.4.1 (see below).
 
 ### Android Gradle Plugin upgrade

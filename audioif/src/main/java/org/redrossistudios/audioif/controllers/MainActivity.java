@@ -353,7 +353,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                     public void fileSelected(final File file) {
                         try {
                             filePath = file.getAbsolutePath();
-                            String fileExtension = file.getName().split("\\.")[1];
+                            String fileExtension = file.getName().substring(file.getName().lastIndexOf('.') + 1);
                             StoryFileType storyFileType = storyFileTypeChecker.GetStoryFileType(fileExtension);
                             storyIs = new FileInputStream(file);
                             configureEngine(storyIs, storyFileType);
@@ -387,7 +387,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             }
         };
 
-        savedGameManager = new SavedGameManager(filePath.split("\\.")[0] + ".sav");
+        savedGameManager = new SavedGameManager(filePath.substring(0, filePath.lastIndexOf('.')) + ".sav");
         machineInit.saveGameDataStore = savedGameManager;
 
         machineInit.ioSystem = new IOSystem() {

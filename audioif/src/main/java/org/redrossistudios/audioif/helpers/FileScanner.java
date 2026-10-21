@@ -14,6 +14,7 @@ import android.widget.ListView;
 import android.widget.TextView;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 
 public class FileScanner {
 
@@ -50,7 +51,9 @@ public class FileScanner {
 
     public FileScanner(final AppCompatActivity activity) {
         this.activity = activity;
-        filePathList = scanDir(getChosenFile(Environment.getExternalStorageDirectory().getPath()),new ArrayList<String>());
+        filePathList = scanDir(GameLibrary.getGamesDir(activity), new ArrayList<String>());
+        Collections.sort(filePathList, String.CASE_INSENSITIVE_ORDER);
+        scanDir(getChosenFile(Environment.getExternalStorageDirectory().getPath()), filePathList);
         if(filePathList.isEmpty()){
             noFilesFound = true;
 
