@@ -26,6 +26,7 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
+import org.redrossistudios.audioif.helpers.AutoSave;
 import org.redrossistudios.audioif.helpers.CommandSession;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.VoiceSettings;
@@ -67,6 +68,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private int utteranceCounter = 0;
     private volatile String pendingUtteranceId;
     private CommandSession session;
+    private ZGame game;
+    private AutoSave autoSave;
     private TextToSpeech tts;
     private InputStream storyIs;
     private FileScanner fileScanner;
@@ -244,7 +247,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
-            ZGame game = new ZGame(executionControl, screenModel);
+            game = new ZGame(executionControl, screenModel);
             session = new CommandSession(game);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -279,13 +282,36 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 }
             });
             String initialText = game.readIntro();
-            session.start(initialText);
-            storyField.setText(initialText);
-            speakThenListen(initialText, true);
+            autoSave = new AutoSave(new File(getFilesDir(), "autosave"), filePath);
+            if (autoSave.exists() && game.loadState(autoSave.loadState())) {
+                String recap = autoSave.loadRecap();
+                session.start(recap);
+                storyField.setText(recap);
+                speakThenListen(AutoSave.RESUMED_NOTE, true);
+                if (!recap.isEmpty()) {
+                    speakThenListen(recap, false);
+                }
+            } else {
+                session.start(initialText);
+                storyField.setText(initialText);
+                speakThenListen(initialText, true);
+            }
 
         } catch (Exception ex) {
             Alert.show("Error", ex.toString() + "\n" + ex.getMessage());
         }
+    }
+
+    private void saveProgress() {
+        if (game != null && autoSave != null) {
+            autoSave.save(game.saveState(), storyField.getText().toString());
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        saveProgress();
+        super.onPause();
     }
 
     @Override
@@ -394,6 +420,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         commandField.setVisibility(View.GONE);
         String text = result.text();
         storyField.setText(text);
+        saveProgress();
 
         StringBuilder responses = new StringBuilder();
         List<String> notes = new ArrayList<>();

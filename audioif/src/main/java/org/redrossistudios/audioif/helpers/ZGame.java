@@ -1,10 +1,15 @@
 package org.redrossistudios.audioif.helpers;
 
 import org.zmpp.ExecutionControl;
+import org.zmpp.base.DefaultMemory;
+import org.zmpp.iff.DefaultFormChunk;
+import org.zmpp.vm.Machine;
+import org.zmpp.vm.MachineRunState;
 import org.zmpp.vm.PortableGameState;
 import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
@@ -92,6 +97,49 @@ public final class ZGame implements CommandSession.Game {
             readOutput();
             return true;
         } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * The game state as Quetzal bytes, for resuming later. Returns null unless
+     * the game is waiting for a command (for example after it has ended).
+     */
+    public byte[] saveState() {
+        try {
+            MachineRunState runState = executionControl.getMachine().getRunState();
+            if (runState == null || !runState.isReadLine()) {
+                return null;
+            }
+            return executionControl.getMachine().captureInputState().exportToFormChunk().getBytes();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Restores bytes from {@link #saveState()}. Returns false, leaving the game
+     * untouched, if they are unreadable or belong to a different story file.
+     */
+    public boolean loadState(byte[] data) {
+        if (data == null) {
+            return false;
+        }
+        try {
+            PortableGameState state = new PortableGameState();
+            if (!state.readSaveGame(new DefaultFormChunk(new DefaultMemory(data)))) {
+                return false;
+            }
+            Machine machine = executionControl.getMachine();
+            PortableGameState current = machine.captureInputState();
+            if (state.getRelease() != current.getRelease() || state.getChecksum() != current.getChecksum()
+                    || !state.getSerialNumber().equals(current.getSerialNumber())
+                    || state.getDynamicMemoryDump() == null
+                    || state.getDynamicMemoryDump().length != current.getDynamicMemoryDump().length) {
+                return false;
+            }
+            return restore(state);
+        } catch (IOException | RuntimeException e) {
             return false;
         }
     }

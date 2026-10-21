@@ -21,6 +21,7 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
+import org.redrossistudios.audioif.helpers.AutoSave;
 import org.redrossistudios.audioif.helpers.CommandSession;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
@@ -61,6 +62,8 @@ public class TextModeActivity extends AppCompatActivity {
     private String filePath;
     private TextModeActivity activity;
     private CommandSession session;
+    private ZGame game;
+    private AutoSave autoSave;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,7 +119,7 @@ public class TextModeActivity extends AppCompatActivity {
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
-            ZGame game = new ZGame(executionControl, screenModel);
+            game = new ZGame(executionControl, screenModel);
             session = new CommandSession(game);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -125,8 +128,16 @@ public class TextModeActivity extends AppCompatActivity {
                 }
             });
             String initialText = game.readIntro();
-            storyField.append(initialText);
-            session.start(initialText);
+            autoSave = new AutoSave(new File(getFilesDir(), "autosave"), filePath);
+            if (autoSave.exists() && game.loadState(autoSave.loadState())) {
+                String recap = autoSave.loadRecap();
+                storyField.append(recap);
+                appendNote(AutoSave.RESUMED_NOTE);
+                session.start(recap);
+            } else {
+                storyField.append(initialText);
+                session.start(initialText);
+            }
 
         } catch (Exception ex) {
             Alert.show("Error", ex.toString() + "\n" + ex.getMessage());
@@ -184,6 +195,19 @@ public class TextModeActivity extends AppCompatActivity {
         }
         footer.requestFocus();
         commandField.setText("");
+        saveProgress();
+    }
+
+    private void saveProgress() {
+        if (game != null && autoSave != null) {
+            autoSave.save(game.saveState(), storyField.getText().toString());
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        saveProgress();
+        super.onPause();
     }
 
     private void appendCommandEcho(String echo) {
