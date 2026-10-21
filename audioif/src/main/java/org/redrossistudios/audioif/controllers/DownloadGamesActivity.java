@@ -14,6 +14,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.GameDownloader;
 import org.redrossistudios.audioif.helpers.GameLibrary;
 import org.redrossistudios.audioif.helpers.InfocomCatalog;
@@ -61,6 +62,7 @@ public class DownloadGamesActivity extends AppCompatActivity {
             }
         });
         setContentView(list);
+        EdgeToEdge.applySystemBarPadding(this);
         if (!getPreferences().getBoolean(KEY_NOTICE_ACCEPTED, false)) {
             showCopyrightNotice();
         }

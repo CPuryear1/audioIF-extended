@@ -6,7 +6,7 @@ android {
     defaultConfig {
         applicationId "org.redrossistudios.audioif"
         minSdk 24
-        targetSdk 33
+        targetSdk 36
         versionCode 5
         versionName "1.4"
 

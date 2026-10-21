@@ -74,7 +74,7 @@ The original project used AGP 3.2.0, which can't parse the manifest `<queries>` 
 | Gradle wrapper | 4.6 | 9.6.0 |
 | JDK | 8 | 17+ |
 | compileSdk | 33 | 36 |
-| targetSdk | 33 | 33 (unchanged, so runtime behavior stays the same) |
+| targetSdk | 33 | 36 (see below) |
 | minSdk | 24 | 24 |
 | Build tools | 28.0.2 (pinned) | 36.0.0 (AGP default) |
 | Repositories | `jcenter()`, `google()` | `google()`, `mavenCentral()` |
@@ -90,6 +90,7 @@ Changes required by the upgrade:
 - **Namespaces:** the `package` attribute was removed from both `AndroidManifest.xml` files and replaced by `namespace` in each module's `build.gradle` (`org.redrossistudios.audioif`, `org.zmpp`).
 - **DSL updates:** `compileSdkVersion`/`minSdkVersion`/`targetSdkVersion` → `compileSdk`/`minSdk`/`targetSdk`; `buildToolsVersion` and the empty `productFlavors` block were removed; `targetSdk`, `versionCode` and `versionName` were removed from the `zmpp` library module because AGP no longer accepts them for libraries.
 - **ProGuard:** `proguard-android.txt` → `proguard-android-optimize.txt` (AGP 9 dropped the old default file). Minification is still disabled.
+- **targetSdk 36:** Google Play Protect on current Android versions blocks sideloaded apps that target an old API level ("built for an older version of Android"), so `targetSdk` was raised from 33 to 36. Apps targeting 35+ are drawn edge-to-edge, and the keyboard no longer resizes the window automatically. `helpers/EdgeToEdge.applySystemBarPadding()` is called after `setContentView` in every activity. It pads the content by the status/navigation bar, display cutout and keyboard insets so that nothing ends up under the system bars or the keyboard.
 
 ## Building
 Requirements: JDK 17 or newer, and an Android SDK with platform 36 and build-tools 36.0.0. Set `ANDROID_HOME` or create a `local.properties` file containing `sdk.dir`.

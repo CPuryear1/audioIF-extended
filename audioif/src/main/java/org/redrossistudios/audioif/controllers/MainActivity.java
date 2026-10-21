@@ -24,6 +24,7 @@ import android.widget.EditText;
 import android.widget.TextView;
 
 import org.redrossistudios.audioif.R;
+import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
 import org.redrossistudios.audioif.helpers.CommandNormalizer;
 import org.redrossistudios.audioif.helpers.CommandSuggester;
@@ -230,6 +231,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         Alert = new Alert(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        EdgeToEdge.applySystemBarPadding(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         storyField = (TextView) findViewById(R.id.textView);
         commandField = (EditText) findViewById(R.id.editText);

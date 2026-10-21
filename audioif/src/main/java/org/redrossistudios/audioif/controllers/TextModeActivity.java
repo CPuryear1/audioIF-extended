@@ -13,6 +13,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.redrossistudios.audioif.R;
+import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
@@ -60,6 +61,7 @@ public class TextModeActivity extends AppCompatActivity {
         getSupportActionBar().hide();
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_text_mode);
+        EdgeToEdge.applySystemBarPadding(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         storyField = (TextView) findViewById(R.id.textView);
         storyField.setText("");

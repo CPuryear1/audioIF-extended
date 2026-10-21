@@ -17,6 +17,7 @@ import android.view.View;
 import android.widget.Button;
 
 import org.redrossistudios.audioif.R;
+import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.GameLibrary;
 
 public class MenuActivity extends AppCompatActivity {
@@ -53,6 +54,7 @@ public class MenuActivity extends AppCompatActivity {
 
         GameLibrary.installBundledGames(this);
         setContentView(R.layout.activity_menu);
+        EdgeToEdge.applySystemBarPadding(this);
         ActionBar actionBar = getSupportActionBar();
         actionBar.setDisplayShowHomeEnabled(true);
         actionBar.setIcon(R.mipmap.ic_launcher);
