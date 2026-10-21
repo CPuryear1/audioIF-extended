@@ -22,7 +22,7 @@ public class CommandSessionTest {
         final Set<String> words = new HashSet<>(Arrays.asList(
                 "n", "s", "e", "w", "north", "south", "east", "west", "take", "open", "drop", "examine",
                 "the", "lamp", "box", "leaflet", "turn", "unlock", "door", "key", "with", "look", "in", "i",
-                "z", "read", "it", "what"));
+                "z", "read", "it", "what", "out", "exit", "u", "d", "put", "x", "pull"));
         final Map<String, Map<String, String>> exits = new HashMap<>();
         final Map<String, String> replies = new HashMap<>();
         final List<String> sent = new ArrayList<>();
@@ -35,6 +35,9 @@ public class CommandSessionTest {
             exit("Clearing", "S", "Path");
             exit("Path", "E", "Hut");
             exit("Hut", "W", "Path");
+            exit("Field", "IN", "Shed");
+            exit("Shed", "OUT", "Field");
+            exit("Shed", "EXIT", "Field");
             replies.put("open the box", "Opening the box reveals a leaflet.");
             replies.put("take the leaflet", "Taken.");
             replies.put("take the lamp", "Taken.");
@@ -51,7 +54,7 @@ public class CommandSessionTest {
         public String send(String command) {
             sent.add(command);
             String upper = command.toUpperCase();
-            if (upper.matches("N|S|E|W")) {
+            if (upper.matches("N|S|E|W|U|D|IN|OUT|EXIT")) {
                 String to = exits.getOrDefault(room, new HashMap<>()).get(upper);
                 if (to == null) {
                     return "You can't go that way.";
@@ -104,7 +107,7 @@ public class CommandSessionTest {
     public void setUp() {
         game = new FakeGame();
         session = new CommandSession(game);
-        session.start("Field\nYou are in a field. There is a lamp here.");
+        session.start("Field\nYou are in a field. There is a lamp here. A narrow trail leads north.");
     }
 
     @Test
@@ -177,7 +180,7 @@ public class CommandSessionTest {
         session.handle("go north");
         CommandSession.Result result = session.handle("undo");
         assertEquals("Field", game.room);
-        assertTrue(result.text().contains("Undone. You are in Field."));
+        assertTrue(result.text().contains("Took back: go north. You are in Field."));
     }
 
     @Test
@@ -210,10 +213,10 @@ public class CommandSessionTest {
     @Test
     public void useXOnYOffersRealVerbs() {
         CommandSession.Result result = session.handle("use the key on the door");
-        assertEquals(Arrays.asList("turn the door with the key", "open the door with the key",
-                "unlock the door with the key"),
+        assertEquals(Arrays.asList("unlock the door with the key", "open the door with the key",
+                "put the key in the door"),
                 result.suggestions);
-        session.handle("three");
+        session.handle("one");
         assertEquals("unlock the door with the key", game.sent.get(game.sent.size() - 1));
     }
 
@@ -239,5 +242,71 @@ public class CommandSessionTest {
     public void detectsRoomNameHeadings() {
         assertEquals("West of House", CommandSession.roomFromResponse("West of House\nYou are standing.", true));
         assertEquals(null, CommandSession.roomFromResponse("Taken.", true));
+    }
+
+    @Test
+    public void goBackReversesNonCompassMoves() {
+        session.handle("go inside");
+        assertEquals("Shed", game.room);
+        session.handle("go back");
+        assertEquals("Field", game.room);
+        assertEquals(Arrays.asList("in", "OUT"), game.sent);
+    }
+
+    @Test
+    public void leaveTheCurrentRoomExits() {
+        session.handle("go inside");
+        session.handle("leave the shed");
+        assertEquals("exit", game.sent.get(game.sent.size() - 1));
+        assertEquals("Field", game.room);
+    }
+
+    @Test
+    public void landmarkInRoomDescriptionGivesDirection() {
+        CommandSession.Result result = session.handle("follow the narrow trail");
+        assertEquals("Path", game.room);
+        assertFalse(result.rejected);
+        assertTrue(result.text().contains("I took that to mean go north"));
+    }
+
+    @Test
+    public void goToLandmarkSeenInAnotherRoom() {
+        session.handle("go north");
+        CommandSession.Result result = session.handle("go to the trail");
+        assertEquals("Field", game.room);
+        assertFalse(result.rejected);
+        assertTrue(result.text().contains("You walk to Field"));
+    }
+
+    @Test
+    public void exitQuestionListsKnownExits() {
+        session.handle("go north");
+        CommandSession.Result result = session.handle("which way can I go?");
+        assertEquals("look", game.sent.get(game.sent.size() - 1));
+        assertTrue(result.text(), result.text().contains("south to Field"));
+    }
+
+    @Test
+    public void chatterAfterCommandIsIgnored() {
+        CommandSession.Result result = session.handle("take the lamp, I don't need anything else");
+        assertEquals(Arrays.asList("take the lamp"), result.sentCommands());
+        assertFalse(result.rejected);
+    }
+
+    @Test
+    public void lookingDoesNotUseAnUndoStep() {
+        session.handle("go north");
+        session.handle("look");
+        session.handle("take that back");
+        assertEquals("Field", game.room);
+    }
+
+    @Test
+    public void absurdVerbSuggestionsAreFiltered() {
+        CommandSession.Result result = session.handle("fry the lamp");
+        for (String suggestion : result.suggestions) {
+            assertFalse(suggestion, suggestion.startsWith("fry"));
+        }
+        assertTrue(result.suggestions.isEmpty() || result.suggestions.get(0).startsWith("try") == false);
     }
 }

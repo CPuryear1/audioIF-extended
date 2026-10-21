@@ -30,7 +30,10 @@ public final class CommandSuggester {
             "that sentence isn't one i recognize",
             "that sentence isn't one i recognise",
             "i beg your pardon",
-            "i don't understand that"
+            "i don't understand that",
+            "noun missing",
+            "too many nouns",
+            "what do you want to"
     ));
 
     /** Messages saying the sentence itself was malformed, with no specific word to fix. */
@@ -39,8 +42,27 @@ public final class CommandSuggester {
             "that sentence isn't one i recogni",
             "i beg your pardon",
             "i didn't understand that sentence",
-            "i don't understand that"
+            "i don't understand that",
+            "noun missing",
+            "too many nouns",
+            "what do you want to"
     );
+
+    /** Verbs worth suggesting in place of a misheard first word ("fry" for "try" is not). */
+    private static final Set<String> SUGGESTED_VERBS = new HashSet<>(Arrays.asList(
+            "take", "get", "grab", "pick", "drop", "open", "close", "shut", "go", "walk", "run", "climb",
+            "enter", "exit", "leave", "read", "examine", "look", "search", "put", "turn", "light", "move",
+            "push", "pull", "press", "kill", "attack", "hit", "give", "throw", "eat", "drink", "wait",
+            "inventory", "unlock", "lock", "wear", "remove", "tie", "untie", "dig", "fill", "pour", "wave",
+            "ring", "inflate", "deflate", "listen", "smell", "touch", "say", "jump", "swim", "follow",
+            "board", "launch", "lower", "raise", "lift", "break", "cut", "burn", "blow", "count", "pray",
+            "knock", "kick", "rub", "shake", "squeeze", "drag", "insert", "cross", "help", "save",
+            "restore", "score", "north", "south", "east", "west", "northeast", "northwest", "southeast",
+            "southwest", "up", "down", "in", "out", "wind", "dive", "feel", "find", "hide", "hold", "yell",
+            "shout", "sing", "sit", "stand", "talk", "tell", "ask", "fix", "melt", "play", "show",
+            "slide", "spin", "stab", "strike", "swing", "unscrew", "wake", "brief", "verbose", "diagnose"));
+
+    private static final Set<String> COMPASS_STEMS = new HashSet<>(Arrays.asList("north", "south", "east", "west"));
 
     /** Full spellings for common words that games store truncated (e.g. "northe"). */
     private static final List<String> COMMON_FULL_WORDS = Arrays.asList(
@@ -202,7 +224,7 @@ public final class CommandSuggester {
                             spelled = entry;
                         }
                     }
-                    if (spelled.equals(words[position])) {
+                    if (spelled.equals(words[position]) || !plausible(words[position], spelled, position)) {
                         continue;
                     }
                     String[] replaced = words.clone();
@@ -237,6 +259,29 @@ public final class CommandSuggester {
             }
         }
         return result;
+    }
+
+    // A first word must become a common verb; a direction must not become a different direction
+    // ("southwest" -> "southern") or appear from a word that wasn't one ("further" -> "northern").
+    private static boolean plausible(String original, String replacement, int position) {
+        if (position == 0 && !SUGGESTED_VERBS.contains(replacement)) {
+            return false;
+        }
+        boolean originalCompass = isCompass(original);
+        boolean replacementCompass = isCompass(replacement);
+        if (originalCompass && CommandNormalizer.direction(original) != null) {
+            return false;
+        }
+        return !replacementCompass || (originalCompass || original.charAt(0) == replacement.charAt(0));
+    }
+
+    private static boolean isCompass(String word) {
+        for (String stem : COMPASS_STEMS) {
+            if (word.startsWith(stem)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Builds the spoken prompt, e.g. "Did you mean one, take lamp, two, ..., three, something else?" */

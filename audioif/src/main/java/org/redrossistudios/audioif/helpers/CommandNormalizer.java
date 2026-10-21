@@ -2,6 +2,7 @@ package org.redrossistudios.audioif.helpers;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,7 +52,23 @@ public final class CommandNormalizer {
     /** Words that make a sentence ending in a direction a movement command. */
     private static final Set<String> MOTION_VERBS = new HashSet<>(Arrays.asList(
             "go", "walk", "head", "run", "follow", "continue", "keep", "travel", "proceed",
-            "wander", "crawl", "return", "move", "hurry", "jog", "step", "sneak"));
+            "wander", "crawl", "return", "move", "hurry", "jog", "step", "sneak", "explore", "climb"));
+
+    /** Words naming a way to go: "take the southwest path", "take the corridor to the southeast". */
+    private static final Set<String> PATH_NOUNS = new HashSet<>(Arrays.asList(
+            "path", "passage", "passageway", "corridor", "tunnel", "trail", "exit", "way", "door",
+            "doorway", "staircase", "stairs", "stairway", "steps", "road", "opening", "hallway", "hall",
+            "archway", "bridge", "track", "route", "fork", "branch", "crawlway", "stair"));
+
+    /** Words that mean the room itself: "examine the room" is "look". */
+    private static final Set<String> ROOM_WORDS = new HashSet<>(Arrays.asList(
+            "room", "place", "area", "surroundings", "location", "surrounding", "scene", "spot"));
+
+    /** Spoken -ing forms after "try": "try opening the door". */
+    private static final Map<String, String> GERUNDS = new HashMap<>();
+
+    /** Phrases matched only when they are the whole utterance ("get out" but not "get out of the boat"). */
+    private static final Map<String, String> EXACT = new HashMap<>();
 
     /** Words after which "back" is filler: "go back down", "put it back in". */
     private static final Set<String> AFTER_BACK = new HashSet<>(Arrays.asList(
@@ -102,7 +119,8 @@ public final class CommandNormalizer {
         for (String filler : new String[]{
                 "please", "can i", "could i", "may i", "can you", "could you", "would you", "will you",
                 "i want to", "i would like to", "i would", "i need to", "i will", "i am going to",
-                "i shall", "i should", "i try to", "let us", "let me", "try to", "now", "ok", "okay",
+                "i shall", "i should", "i try to", "let us", "let me", "try to", "try and", "try", "maybe",
+                "i think i will", "i guess i will", "now", "ok", "okay",
                 "just", "then", "and", "so", "um", "uh", "well", "alright", "all right", "hey",
                 "next", "first", "quickly", "carefully"}) {
             addLeadingFiller(filler);
@@ -125,6 +143,26 @@ public final class CommandNormalizer {
         WORD_REPLACEMENTS.put("upstairs", "up");
         WORD_REPLACEMENTS.put("downstairs", "down");
         WORD_REPLACEMENTS.put("lantern light", "lantern");
+        WORD_REPLACEMENTS.put("place mat", "mat");
+        WORD_REPLACEMENTS.put("placemat", "mat");
+
+        for (String[] gerund : new String[][]{
+                {"going", "go"}, {"walking", "walk"}, {"heading", "head"}, {"running", "run"},
+                {"climbing", "climb"}, {"opening", "open"}, {"closing", "close"}, {"pushing", "push"},
+                {"pulling", "pull"}, {"taking", "take"}, {"getting", "get"}, {"picking", "pick"},
+                {"putting", "put"}, {"dropping", "drop"}, {"turning", "turn"}, {"moving", "move"},
+                {"looking", "look"}, {"reading", "read"}, {"examining", "examine"}, {"entering", "enter"},
+                {"unlocking", "unlock"}, {"lifting", "lift"}, {"raising", "raise"}, {"lowering", "lower"},
+                {"searching", "search"}, {"attacking", "attack"}, {"killing", "kill"}, {"hitting", "hit"},
+                {"throwing", "throw"}, {"giving", "give"}, {"eating", "eat"}, {"drinking", "drink"},
+                {"waiting", "wait"}, {"listening", "listen"}, {"digging", "dig"}, {"lighting", "light"},
+                {"waving", "wave"}, {"ringing", "ring"}, {"knocking", "knock"}, {"breaking", "break"},
+                {"crossing", "cross"}, {"following", "follow"}, {"inserting", "insert"}, {"sliding", "slide"},
+                {"sticking", "stick"}, {"swimming", "swim"}, {"jumping", "jump"}, {"tying", "tie"},
+                {"filling", "fill"}, {"pouring", "pour"}, {"touching", "touch"}, {"saying", "say"},
+                {"exploring", "explore"}, {"leaving", "leave"}, {"exiting", "exit"}}) {
+            GERUNDS.put(gerund[0], gerund[1]);
+        }
 
         // "x|examine": use "x" if the game knows it, otherwise fall back to "examine".
         put("examine", "x|examine");
@@ -139,6 +177,40 @@ public final class CommandNormalizer {
         put("look into", "look in");
         put("what is in", "look in");
         put("what is inside", "look in");
+        put("what is on", "look on");
+        put("what is on top of", "look on");
+        put("what is under", "look under");
+        put("what is behind", "look behind");
+        put("what is the", "x the|examine the");
+        put("what are the", "x the|examine the");
+        put("take a look at", "x|examine");
+        put("have a look at", "x|examine");
+        put("take a look in", "look in");
+        put("have a look in", "look in");
+        put("take a look inside", "look in");
+        put("take a look under", "look under");
+        putTerminal("take a look", "look");
+        putTerminal("have a look", "look");
+        putTerminal("take a look around", "look");
+        putTerminal("have a look around", "look");
+        putTerminal("is there", "look");
+        putTerminal("are there", "look");
+        putTerminal("explore", "look");
+        for (String peek : new String[]{"peek", "peer", "glance", "gaze", "stare"}) {
+            put(peek + " into", "look in");
+            put(peek + " in", "look in");
+            put(peek + " inside", "look in");
+            put(peek + " through", "look through");
+            put(peek + " under", "look under");
+            put(peek + " behind", "look behind");
+            put(peek + " at", "x|examine");
+            putTerminal(peek + " around", "look");
+        }
+        put("stick the", "put the");
+        put("slide the", "put the");
+        put("insert the", "put the");
+        put("pull out", "pull");
+        put("take out", "take");
         put("again", "g");
         putTerminal("repeat that", "g");
         putTerminal("do that again", "g");
@@ -210,6 +282,30 @@ public final class CommandNormalizer {
         putTerminal("restart the game", "restart");
         putTerminal("quit the game", "quit");
         putTerminal("exit the game", "quit");
+
+        // Leaving a place; whole-utterance only so "get out of the boat" still reaches the game.
+        for (String out : new String[]{"get out", "get out of here", "go out", "go outside", "head outside",
+                "head out", "walk out", "walk outside", "step outside", "step out", "leave", "leave here",
+                "go back outside", "exit here", "outside", "get outside"}) {
+            putExact(out, "exit|out");
+        }
+        for (String through : new String[]{"go through", "walk through", "step through", "go in there",
+                "go inside", "walk inside", "step inside", "head inside", "inside", "get inside"}) {
+            putExact(through, "in");
+        }
+        // Bare "climb up" makes Zork II print a garbled object name; players mean the direction.
+        putExact("climb up", "U");
+        putExact("climb down", "D");
+        putExact("climb upward", "U");
+        putExact("climb downward", "D");
+        putExact("what is in", "look");
+        putExact("what is inside", "look");
+        putExact("what is on", "look");
+    }
+
+    /** Like {@link #put}, but only when the phrase is the whole utterance. */
+    public static void putExact(String spokenPhrase, String canonicalCommand) {
+        EXACT.put(canonicalize(spokenPhrase), canonicalCommand);
     }
 
     private CommandNormalizer() { }
@@ -259,7 +355,15 @@ public final class CommandNormalizer {
             return spoken.trim();
         }
 
-        String endDirection = motionEndingInDirection(text);
+        String exact = EXACT.get(text);
+        if (exact != null) {
+            String chosen = firstKnown(exact, "", dictionary);
+            if (chosen != null) {
+                return chosen;
+            }
+        }
+
+        String endDirection = motionDirection(text);
         if (endDirection != null && (dictionary == null || dictionary.contains(endDirection.toLowerCase(Locale.ROOT)))) {
             return endDirection;
         }
@@ -272,16 +376,43 @@ public final class CommandNormalizer {
             }
         }
         if (bestPhrase == null) {
-            return text;
+            return aboutTheRoom(text) ? "look" : text;
         }
         String rest = TERMINAL.contains(bestPhrase) ? "" : text.substring(bestPhrase.length());
-        for (String canonical : PHRASES.get(bestPhrase).split("\\|")) {
+        String chosen = firstKnown(PHRASES.get(bestPhrase), rest, dictionary);
+        if (chosen == null) {
+            return text;
+        }
+        // "look in" with nothing to look in, or "examine the room", means look around.
+        if (chosen.matches("look (in|on|under|behind|through)") || aboutTheRoom(chosen)) {
+            return "look";
+        }
+        return chosen;
+    }
+
+    private static String firstKnown(String canonicals, String rest, Dictionary dictionary) {
+        for (String canonical : canonicals.split("\\|")) {
             String canonicalVerb = canonical.split(" ")[0].toLowerCase(Locale.ROOT);
             if (dictionary == null || dictionary.contains(canonicalVerb)) {
                 return (canonical + rest).trim();
             }
         }
-        return text;
+        return null;
+    }
+
+    // "examine the room", "search the area", "describe the place".
+    private static boolean aboutTheRoom(String command) {
+        String[] words = command.split(" ");
+        if (words.length != 3 || !words[1].equals("the") || !ROOM_WORDS.contains(words[2])) {
+            return false;
+        }
+        switch (words[0]) {
+            case "x": case "examine": case "describe": case "search": case "look": case "inspect": case "check":
+            case "explore": case "study": case "scan":
+                return true;
+            default:
+                return false;
+        }
     }
 
     /**
@@ -302,7 +433,28 @@ public final class CommandNormalizer {
         for (Map.Entry<String, String> replacement : WORD_REPLACEMENTS.entrySet()) {
             text = replaceWords(text, replacement.getKey(), replacement.getValue());
         }
+        text = stemGerund(text);
+        text = dropTrailingParticles(text);
         return replaceDeterminers(text);
+    }
+
+    // "going southwest" -> "go southwest" (after "try" is stripped from "try going southwest").
+    private static String stemGerund(String text) {
+        int space = text.indexOf(' ');
+        String first = space < 0 ? text : text.substring(0, space);
+        String stem = GERUNDS.get(first);
+        return stem == null ? text : stem + (space < 0 ? "" : text.substring(space));
+    }
+
+    // "pull the mat back" -> "pull the mat"; "pull the mat out from under the door" -> "pull the mat".
+    private static String dropTrailingParticles(String text) {
+        String[] words = text.split(" ");
+        if (words.length >= 3 && words[words.length - 1].equals("back") && !MOTION_VERBS.contains(words[0])
+                && !words[0].equals("turn") && !words[0].equals("come")
+                && !text.equals("take that back") && !text.equals("take it back")) {
+            text = text.substring(0, text.length() - " back".length());
+        }
+        return text.replaceFirst("^((?:pull|drag|yank|tug|slide|take|get|remove) .+?) (?:out )?from (?:under|beneath|underneath) .+$", "$1");
     }
 
     private static String stripFillers(String text) {
@@ -359,15 +511,42 @@ public final class CommandNormalizer {
         return String.join(" ", out);
     }
 
-    // "follow the passage north" -> "N"; needs at least one word between verb and direction
-    // only when the verb could be followed by a direction directly (handled by the phrase map).
-    private static String motionEndingInDirection(String text) {
+    // "follow the passage north" -> "N", "walk north across the ford" -> "N",
+    // "take the southwest path" -> "SW", "take the corridor to the southeast" -> "SE".
+    private static String motionDirection(String text) {
         String[] words = text.split(" ");
-        if (words.length < 2 || !MOTION_VERBS.contains(words[0])) {
+        if (words.length < 2) {
+            return null;
+        }
+        boolean motion = MOTION_VERBS.contains(words[0]);
+        boolean pathVerb = words[0].equals("take") || words[0].equals("use") || words[0].equals("choose");
+        if (!motion && !pathVerb) {
             return null;
         }
         if (words[0].equals("move") && words.length > 2) {
             return null; // "move the rug north" is about the rug
+        }
+        if (motion && !words[0].equals("climb")) {
+            // A direction straight after the verb: "walk north across the ford".
+            String afterVerb = directionAt(words, 1);
+            if (afterVerb != null && words.length > 2 && !afterVerb.equals("U") && !afterVerb.equals("D")) {
+                return afterVerb;
+            }
+        }
+        boolean mentionsPath = false;
+        for (String word : words) {
+            mentionsPath |= PATH_NOUNS.contains(word);
+        }
+        if (pathVerb && !mentionsPath) {
+            return null;
+        }
+        // A direction naming the path: "the southwest path".
+        for (int i = 1; i < words.length - 1; i++) {
+            String direction = directionAt(words, i);
+            int next = i + (i + 1 < words.length && DIRECTIONS.containsKey(words[i] + " " + words[i + 1]) ? 2 : 1);
+            if (direction != null && next < words.length && PATH_NOUNS.contains(words[next])) {
+                return direction;
+            }
         }
         if (words.length >= 3) {
             String two = words[words.length - 2] + " " + words[words.length - 1];
@@ -380,6 +559,14 @@ public final class CommandNormalizer {
             return DIRECTIONS.get(last);
         }
         return null;
+    }
+
+    // The direction starting at words[i], including two-word ones like "north east".
+    private static String directionAt(String[] words, int i) {
+        if (i + 1 < words.length && DIRECTIONS.containsKey(words[i] + " " + words[i + 1])) {
+            return DIRECTIONS.get(words[i] + " " + words[i + 1]);
+        }
+        return i < words.length ? DIRECTIONS.get(words[i]) : null;
     }
 
     private static String replaceWords(String text, String from, String to) {

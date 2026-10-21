@@ -116,4 +116,45 @@ public class CommandNormalizerTest {
         CommandNormalizer.put("grab", "take");
         assertEquals("take lamp", CommandNormalizer.normalize("Grab lamp", ALL_WORDS));
     }
+
+    @Test
+    public void zorkTwoPlaytestPhrasings() {
+        String[][] cases = {
+                {"what's in here?", "look"},
+                {"what's on the mat?", "look on the mat"},
+                {"what's that brick?", "x the brick"},
+                {"what's here?", "look"},
+                {"examine the room", "look"},
+                {"describe this place", "look"},
+                {"let's try north", "N"},
+                {"try going southwest", "SW"},
+                {"try opening the door", "open the door"},
+                {"I'd like to explore east", "E"},
+                {"take the southwest path", "SW"},
+                {"take the narrower corridor to the southeast", "SE"},
+                {"walk north across the ford", "N"},
+                {"take a look at the table", "x the table"},
+                {"peek into the keyhole", "look in the keyhole"},
+                {"peer through the window", "look through the window"},
+                {"stick the letter opener in the keyhole", "put the letter opener in the keyhole"},
+                {"slide the place mat under the door", "put the mat under the door"},
+                {"then pull the mat back", "pull the mat"},
+                {"pull the mat out from under the door", "pull the mat"},
+                {"pull out the mat", "pull the mat"},
+                {"is there a key on it?", "look"},
+                {"get out of here", "exit"},
+                {"go outside", "exit"},
+                {"go through", "in"},
+                {"climb up", "U"},
+                {"get out of the boat", "get out of the boat"},
+                {"take the lamp", "take the lamp"},
+                {"take the path", "take the path"},
+                {"move the rug north", "move the rug north"},
+        };
+        for (String[] c : cases) {
+            assertEquals(c[0], c[1], CommandNormalizer.normalize(c[0], ALL_WORDS));
+        }
+        assertEquals("take the back", CommandNormalizer.canonicalize("take that back"));
+        assertEquals("go back", CommandNormalizer.canonicalize("go back"));
+    }
 }
