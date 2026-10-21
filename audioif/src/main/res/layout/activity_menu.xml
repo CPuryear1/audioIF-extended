@@ -107,4 +107,14 @@
         android:drawableStart="@drawable/ic_explore"
         android:text="Browse supported games" />
 
+    <TextView
+        android:id="@+id/versionLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:textColor="@color/parchmentMuted"
+        android:textSize="12sp"
+        tools:text="Version 2.0" />
+
 </LinearLayout>

@@ -18,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
+import android.widget.TextView;
 
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
@@ -94,6 +95,7 @@ public class MenuActivity extends AppCompatActivity {
                 }
             }
         });
+        showVersion();
         Button textButton = (Button)findViewById(R.id.textButton);
         Button linkButton = (Button)findViewById(R.id.linkButton);
         Button downloadButton = (Button)findViewById(R.id.downloadButton);
@@ -147,6 +149,16 @@ public class MenuActivity extends AppCompatActivity {
                     System.exit(1);
                 }
                 break;
+        }
+    }
+
+    private void showVersion() {
+        TextView label = (TextView) findViewById(R.id.versionLabel);
+        try {
+            String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            label.setText("Audio IF – Extended, version " + version);
+        } catch (PackageManager.NameNotFoundException e) {
+            label.setVisibility(View.GONE);
         }
     }
 
