@@ -69,14 +69,6 @@ public interface Dictionary {
   int getEntryAddress(int entryNum);
 
   /**
-   * Returns the decoded word stored at the specified position. Words longer
-   * than the story's maximum entry length are stored truncated.
-   * @param entryNum entry number between (0 - getNumberOfEntries() - 1)
-   * @return the decoded word
-   */
-  String getEntryWord(int entryNum);
-
-  /**
    * Looks up a string in the dictionary. The word will be truncated to
    * the maximum word length and looked up. The result is the address
    * of the entry or 0 if it is not found.
