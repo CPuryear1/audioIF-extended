@@ -79,6 +79,15 @@ public final class ZGame implements CommandSession.Game {
     }
 
     @Override
+    public int[] stateVector() {
+        try {
+            return GameStateReader.read(executionControl.getMachine());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    @Override
     public Object snapshot() {
         try {
             return AudioIfExtensions.captureInputState(executionControl.getMachine());

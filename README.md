@@ -64,6 +64,7 @@ The core of this application uses the ZMPP interpreter project: https://sourcefo
   - Chatter after a command ("go north, that looks interesting") is ignored.
   - Pronouns: if the game doesn't understand "it"/"them", the command is retried with the last noun you used, e.g. "(I took it to mean the leaflet.)".
   - Help, hint and undo for games that don't have them. Undo uses up to 10 snapshots captured by `AudioIfExtensions.captureInputState` / `restoreInputState` (see below), and says what was taken back ("Took back: open the door. You are in Kitchen."). Look, inventory and score don't use up an undo step.
+  - Walkthrough hints for Zork I, II and III (see "Walkthrough hints" below). Saying "help" or "hint" tells you what to do next, more precisely each time you ask: first where the next step is, then how to get there or which things to use, then the exact command ("At Up a Tree, try: get egg. From here, go north, north, then up."). The hint starts vague again once you've done that step. "Commands", "list commands" or "how do I play" read the general command help.
   - Explanations: questions ("why is…") get a note that the game can't answer questions. "Use X on Y" offers real verbs, chosen by the objects: keys → unlock, open, put; holes and slots → put; lamps → light. "What do you want to turn the bolt with?" gets a note to say the whole command. Other rejections get numbered suggestions. Pick one by saying or typing its number. Suggestions use words from recent replies, and implausible ones (a non-verb replacing the verb, a direction swapped for a different direction) are dropped.
   - Text mode shows what was actually sent in brackets, e.g. `> check the mailbox  [examine the mailbox]`, and shows app notes in italics, so it is a quick way to test voice-command handling.
 - Rejected commands get spoken suggestions from `CommandSuggester` (`audioif/src/main/java/org/redrossistudios/audioif/helpers/CommandSuggester.java`). After each command, the game's response is checked against a list of rejection phrases (add more with `CommandSuggester.addRejectionPhrase`). Sentence-level errors such as "There was no verb in that sentence!" get no word suggestions. If it matches, the word the game names (`the word "X"`) or the unknown words in the command (or, if every word is known, the object words) are replaced with dictionary words within a small edit distance (typos and swapped letters count as 1). Results are ranked by distance, then shared prefix, and the top three are read out as numbered options. The dictionary is read through `AudioIfExtensions.getDictionaryWords`. Z-Machine dictionaries store only the first 6 (v1-3) or 9 (v4+) letters of each word, so shortened entries are expanded back to full words seen in the game's output; entries that can't be expanded are skipped. Object words are only suggested if the game has mentioned them, so suggestions name real things. Typos of words up to 4 letters allow edit distance 1; longer words allow 2.
@@ -123,6 +124,23 @@ Requirements: JDK 17 or newer, and an Android SDK with platform 36 and build-too
 ```
 
 The APK is written to `audioif/build/outputs/apk/debug/`.
+
+### Walkthrough hints
+
+The hints come from the IF Archive's step-by-step Zork walkthroughs (`solutions/Sols2.zip`). They aren't stored in this repository. For a personal build, fetch them before building:
+
+```
+powershell -File tools/fetch-walkthroughs.ps1
+```
+
+This copies `Zork I.txt`, `Zork II.txt` and `Zork III.txt` into `audioif/src/main/assets/walkthroughs/`, which is git-ignored. Without them the app builds and runs normally, and "help" reads the general command help.
+
+How it works (`helpers/WalkthroughParser`, `WalkthroughIndex`, `HintCatalog`, `HintAdvisor`, `HintLoader`):
+- When a game starts, `HintLoader` replays its walkthrough in a hidden copy of the game on a background thread. `GameStateReader` records, for each step, which object parents, attributes and globals it changed. Steps that fail (for example a random fight or a timed event) are retried from earlier snapshots, with extra waits if needed.
+- During the replay, the first time the walkthrough reaches a room, every direction is tried and then undone. This gives a map of real exits. Zork's map isn't symmetric (east from North of House leads behind it, but west from there enters the kitchen), so routes only use moves that the replay checked.
+- A goal is a step that changes lasting state without moving the player. The next hint is the first goal whose changes aren't already true in your game, so hints follow your progress even if you play in a different order.
+- The first load takes a while (up to tens of seconds on a phone). Until then "help" says hints are loading. The result is cached in the app's `files/hints` folder by game checksum, so later loads are instant.
+- Only Z-machine story files (`.z1`–`.z8`) with a matching walkthrough get hints.
 
 To pull in changes from the original project:
 
