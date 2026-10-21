@@ -1,5 +1,15 @@
 apply plugin: 'com.android.application'
 
+static String gitCommit() {
+    try {
+        def process = ['git', 'rev-parse', '--short', 'HEAD'].execute()
+        def hash = process.text.trim()
+        return process.waitFor() == 0 && hash ? hash : 'unknown'
+    } catch (Exception ignored) {
+        return 'unknown'
+    }
+}
+
 android {
     namespace 'org.redrossistudios.audioif'
     compileSdk 36
@@ -7,13 +17,17 @@ android {
         applicationId "org.redrossistudios.audioif"
         minSdk 24
         targetSdk 36
-        versionCode 5
-        versionName "1.4"
+        versionCode 6
+        versionName "2.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
     }
     buildTypes {
+        // Debug builds show the commit they were built from, e.g. "2.0-debug (956c743)".
+        debug {
+            versionNameSuffix "-debug (" + gitCommit() + ")"
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
