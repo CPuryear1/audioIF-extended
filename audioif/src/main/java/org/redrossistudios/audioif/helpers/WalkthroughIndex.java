@@ -178,8 +178,13 @@ public final class WalkthroughIndex {
 
     /** The first goal not yet done, or -1 if all are. */
     public int nextGoal(int[] state) {
+        return nextGoal(state, java.util.Collections.<Integer>emptySet());
+    }
+
+    /** The first goal not yet done and not in {@code skip}, or -1. */
+    public int nextGoal(int[] state, java.util.Set<Integer> skip) {
         for (int i = 0; i < steps.size(); i++) {
-            if (steps.get(i).isGoal() && !isDone(i, state)) {
+            if (steps.get(i).isGoal() && !skip.contains(i) && !isDone(i, state)) {
                 return i;
             }
         }

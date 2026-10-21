@@ -51,6 +51,8 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
 - Zork's map isn't symmetric. Routes use only exits that the replay actually tried. Guessed reverse exits (`CommandSession.guessedExits`) are left out of the hint routes.
 - ZMPP's random generator isn't saved in snapshots, so exploring or retrying changes later random events. The replay retries failed steps from earlier snapshots.
 - "help" describes the current situation (`CommandSession.situation`: room, visible things, exits, things to try); "hint" gives walkthrough hints; "how do I play" reads the guide. Fetch walkthroughs before building an APK for the phone, or hints are missing.
+- Some walkthrough goals become impossible (Zork I's broken egg is a different object). `HintAdvisor.skipHintedIfStuck` skips a goal when the hinted command gets an "already…" reply but the state doesn't match.
+- The app's own words (help, hint, undo) must not be `SpeechMatcher` candidates, or game verbs such as "hang" get corrected to them.
 - Speech: on ERROR_CLIENT, busy or disconnected errors the recognizer is recreated. Listening pauses after 3 misses in a row, or while the app is in the background.
 
 ## Current state and open ideas (October 2026)
