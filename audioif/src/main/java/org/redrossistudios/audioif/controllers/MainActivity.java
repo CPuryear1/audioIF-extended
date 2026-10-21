@@ -542,6 +542,16 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         storyField.setText(result.heard != null ? "> " + result.heard + "\n\n" + text : text);
         saveProgress();
 
+        if (result.pauseListening) {
+            stopVoiceInput();
+            failedListens = 0;
+            pendingUtteranceId = null;
+            log(CommandSession.PAUSED_NOTE);
+            tts.speak(CommandSession.PAUSED_NOTE, TextToSpeech.QUEUE_FLUSH, null, "listen-paused");
+            setStatus("Paused \u2014 tap the story to listen");
+            return;
+        }
+
         StringBuilder responses = new StringBuilder();
         List<String> notes = new ArrayList<>();
         for (CommandSession.Exchange exchange : result.exchanges) {

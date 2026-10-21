@@ -79,6 +79,8 @@ public final class CommandSession {
         public List<String> suggestions = Collections.emptyList();
         /** For speech, the words the app went with after matching them to the game; else null. */
         public String heard;
+        /** True if the player asked the app to stop listening ("stop", "pause"). */
+        public boolean pauseListening;
 
         public List<String> sentCommands() {
             List<String> sent = new ArrayList<>();
@@ -165,6 +167,25 @@ public final class CommandSession {
     private static final Set<String> BACK_PHRASES = canonicalSet("go back", "back", "return", "go back the way i came",
             "retrace the steps", "go back where i came from", "go back to where i was",
             "head back", "walk back", "turn back", "turn around", "go back the way i came in");
+    // "run away from the troll": Zork wants a direction, and a wasted turn can be fatal, so go back.
+    private static final Pattern FLEE = Pattern.compile("^(?:run away|run off|flee|escape|retreat|get away|"
+            + "run back|back away|run for it|get out of here|run)(?: from (?:the )?.+)?$");
+    private static final Set<String> STOP_PHRASES = canonicalSet("stop", "stop listening", "pause",
+            "pause listening", "be quiet", "quiet", "shut up", "stop talking", "hold on", "stop the game",
+            "i am done", "that is enough", "goodbye", "good bye", "bye");
+    public static final String PAUSED_NOTE = "Okay, I've stopped listening. Your game is saved. "
+            + "Tap the story when you want to carry on.";
+    // What phone recognizers make of a lone "hint" when it isn't among the alternatives.
+    private static final Set<String> HINT_ALIKES = set("tent", "tint", "kent", "hent", "mint", "meant",
+            "can't", "cant", "hence", "hints", "hind", "hinted", "lint", "hinge");
+    private static final Pattern EXAMINE_PLACE = Pattern.compile(
+            "^(?:examine|look at|inspect|search|check out|explore|describe|x) (?:the )?(.+)$");
+    private static final Pattern WEAPON_SWING = Pattern.compile("^(?:swing|thrust|stab|slash|brandish|wave|"
+            + "wield|lunge|jab|swipe|strike|use) (?:with )?(?:the |my )?((?:elvish |nasty )?(?:sword|knife|axe|"
+            + "dagger|stiletto|blade))(?: (?:at|on|into|toward|towards) (?:the )?(.+))?$");
+    private static final Set<String> CREATURES = set("troll", "thief", "robber", "cyclops", "bat", "ghost",
+            "ghosts", "spirits", "grue", "dragon", "demon", "guardian", "wizard", "gnome", "monster", "giant",
+            "vampire", "snake", "serpent", "wolf", "bear", "goblin", "orc", "skeleton", "zombie");
     private static final Set<String> CONTINUE_PHRASES = canonicalSet("continue", "keep going", "go on",
             "forward", "go forward", "keep walking", "carry on", "walk on", "keep moving", "move on",
             "onward", "go straight", "straight ahead", "go straight ahead", "go further", "go farther",
@@ -369,6 +390,11 @@ public final class CommandSession {
             undo(result);
             return result;
         }
+        if (isStop(canonical)) {
+            result.pauseListening = true;
+            result.note(PAUSED_NOTE);
+            return result;
+        }
 
         if (EXIT_QUESTIONS.contains(canonical)) {
             describeExits(result);
@@ -448,9 +474,11 @@ public final class CommandSession {
             clause = canonical;
         }
 
-        if (BACK_PHRASES.contains(canonical)) {
+        boolean flee = FLEE.matcher(canonical).matches();
+        if (BACK_PHRASES.contains(canonical) || flee) {
             if (lastMove == null) {
-                result.note("I don't know which way you came from yet.");
+                result.note(flee ? "To get away, say a direction, like north or south."
+                        : "I don't know which way you came from yet.");
                 return false;
             }
             String direction = backDirection();
@@ -466,6 +494,21 @@ public final class CommandSession {
                 ok = runCommand(lastMove.direction, result);
             }
             return ok;
+        }
+        Matcher examine = EXAMINE_PLACE.matcher(canonical);
+        if (examine.matches() && isRoomItself(examine.group(1))) {
+            return runCommand("look", result);
+        }
+        Matcher swing = WEAPON_SWING.matcher(canonical);
+        if (swing.matches()) {
+            String target = swing.group(2) != null ? swing.group(2) : creatureHere();
+            if (target != null) {
+                // "Swing the sword" only whooshes in Zork; fighting takes "attack the troll with the sword".
+                String attack = (game.contains("attack") ? "attack" : "kill") + " the " + target + " with the "
+                        + swing.group(1);
+                result.note("To fight, say " + attack + ".");
+                return runCommand(attack, result);
+            }
         }
         Matcher goTo = GO_TO.matcher(canonical);
         if (goTo.matches() && CommandNormalizer.direction(goTo.group(1)) == null) {
@@ -493,6 +536,53 @@ public final class CommandSession {
     }
 
     // "leave the gazebo" when in the Gazebo, or "leave the room".
+    // "examine the room", or "examine the living room" in a game that doesn't know "living".
+    private boolean isRoomItself(String place) {
+        if (set("room", "area", "place", "surroundings", "around", "here", "this place", "this room").contains(place)) {
+            return true;
+        }
+        if (room == null || place.equals("house") || place.equals("building") || !isCurrentPlace(place)) {
+            return false;
+        }
+        for (String word : place.split(" ")) {
+            if (!word.equals("the") && !game.contains(word)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A creature the player can see ("troll"), or null.
+    private String creatureHere() {
+        List<String> present = game.thingsHere();
+        for (String thing : present) {
+            for (String word : thing.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+                if (CREATURES.contains(word)) {
+                    return word;
+                }
+            }
+        }
+        if (!present.isEmpty()) {
+            // The game's object tree is trusted: a troll that has died is gone from it.
+            return null;
+        }
+        for (String thing : visibleThings()) {
+            for (String word : thing.toLowerCase(Locale.ROOT).split(" ")) {
+                if (CREATURES.contains(word)) {
+                    return word;
+                }
+            }
+        }
+        String last = recentResponses.isEmpty() ? "" : recentResponses.getLast();
+        String text = ((roomDescription == null ? "" : roomDescription) + " " + last).toLowerCase(Locale.ROOT);
+        for (String word : text.split("[^a-z]+")) {
+            if (CREATURES.contains(word) && game.contains(word)) {
+                return word;
+            }
+        }
+        return null;
+    }
+
     private boolean isCurrentPlace(String place) {
         Set<String> generic = set("room", "place", "area", "building", "house", "here", "this place");
         if (generic.contains(place)) {
@@ -742,6 +832,9 @@ public final class CommandSession {
         if (firstWord.equals("use") && !game.contains("use")) {
             if (use.matches()) {
                 offer(useOptions(use.group(1), use.group(2)), result);
+            } else if (canonical.startsWith("use ") && !useAlone(canonical.replaceFirst("^use (?:the |my )?", ""))
+                    .isEmpty()) {
+                offer(useAlone(canonical.replaceFirst("^use (?:the |my )?", "")), result);
             } else {
                 result.note("This game doesn't know use. Say what to do instead, like turn, "
                         + "open, light, wave or read.");
@@ -818,6 +911,58 @@ public final class CommandSession {
                 + example + ".";
     }
 
+    // "use the lamp": what that thing is usually used for.
+    private List<String> useAlone(String thing) {
+        List<String> options = new ArrayList<>();
+        String the = "the " + thing;
+        if (thing.matches(".*\\b(lamp|lantern|torch|flashlight)\\b.*")) {
+            addOption(options, "turn", "turn on " + the);
+            addOption(options, "light", "light " + the);
+            addOption(options, "turn", "turn off " + the);
+        } else if (thing.matches(".*\\b(match|matches|candle|candles)\\b.*")) {
+            addOption(options, "light", "light " + the);
+        } else if (thing.matches(".*\\brope\\b.*")) {
+            for (String other : visibleThings()) {
+                if (!other.contains("rope") && !CREATURES.contains(other)) {
+                    addOption(options, "tie", "tie " + the + " to the " + other);
+                    break;
+                }
+            }
+            addOption(options, "climb", "climb " + the);
+        } else if (thing.matches(".*\\b(sword|knife|axe|dagger|stiletto|blade)\\b.*")) {
+            String creature = creatureHere();
+            if (creature != null) {
+                addOption(options, "attack", "attack the " + creature + " with " + the);
+            }
+        } else if (thing.matches(".*\\b(key|keys)\\b.*")) {
+            String lock = "door";
+            for (String other : visibleThings()) {
+                if (other.matches(".*\\b(door|grate|grating|gate|chest|lock)\\b.*")) {
+                    lock = other;
+                    break;
+                }
+            }
+            addOption(options, "unlock", "unlock the " + lock + " with " + the);
+        }
+        addOption(options, "examine", "examine " + the);
+        String[] words = thing.split(" ");
+        if (OPEN_THINGS.contains(words[words.length - 1])) {
+            addOption(options, "open", "open " + the);
+        }
+        return options;
+    }
+
+    // "stop" or "pause", unless the game itself knows that one-word command.
+    private boolean isStop(String canonical) {
+        return STOP_PHRASES.contains(canonical) && (canonical.contains(" ") || !game.contains(canonical));
+    }
+
+    private void addOption(List<String> options, String verb, String option) {
+        if (options.size() < 3 && game.contains(verb) && !options.contains(option)) {
+            options.add(option);
+        }
+    }
+
     private static String exampleFor(String canonical) {
         String verb = canonical.split(" ")[0];
         switch (verb) {
@@ -870,6 +1015,21 @@ public final class CommandSession {
                     result.exchanges.remove(result.exchanges.size() - 1);
                 }
                 return walkTo(target, result);
+            }
+            // The place the last hint sent the player to, by the walkthrough's route.
+            HintAdvisor advisor = hints;
+            List<String> hinted = advisor == null ? null : advisor.routeToHinted(place, room, game.stateVector());
+            if (hinted != null && !hinted.isEmpty()) {
+                while (result.exchanges.size() > mark) {
+                    result.exchanges.remove(result.exchanges.size() - 1);
+                }
+                for (String step : hinted) {
+                    if (!runCommand(step, result)) {
+                        return false;
+                    }
+                }
+                result.note("You walk to " + room + ".");
+                return true;
             }
             result.rejected = true;
             result.note("I don't know a place called " + place + " yet. Try a direction, like north or go up.");
@@ -1020,8 +1180,24 @@ public final class CommandSession {
         for (String alternative : heard) {
             String canonical = CommandNormalizer.canonicalize(alternative);
             if (SITUATION_PHRASES.contains(canonical) || HELP_PHRASES.contains(canonical)
-                    || HINT_PHRASES.contains(canonical) || UNDO_PHRASES.contains(canonical)) {
-                return handle(alternative);
+                    || HINT_PHRASES.contains(canonical) || UNDO_PHRASES.contains(canonical)
+                    || isStop(canonical)) {
+                Result result = handle(alternative);
+                result.heard = canonical;
+                return result;
+            }
+        }
+        // A lone "hint" often comes back as "tent" or "can't", with no "hint" among the guesses.
+        if (!heard.isEmpty() && !hasPendingSuggestions()) {
+            String first = heard.get(0).trim().toLowerCase(Locale.ROOT);
+            if (!first.contains(" ") && !game.contains(first) && !appWords().contains(first)) {
+                for (String alternative : heard) {
+                    if (HINT_ALIKES.contains(alternative.trim().toLowerCase(Locale.ROOT))) {
+                        Result result = handle("hint");
+                        result.heard = "hint";
+                        return result;
+                    }
+                }
             }
         }
         String chosen = SpeechMatcher.choose(heard, speechVocabulary());
@@ -1095,7 +1271,7 @@ public final class CommandSession {
         if (appWords == null) {
             Set<String> words = new HashSet<>(CommandNormalizer.knownWords());
             for (Set<String> phrases : Arrays.asList(SITUATION_PHRASES, HELP_PHRASES, HINT_PHRASES, UNDO_PHRASES,
-                    BACK_PHRASES, CONTINUE_PHRASES, EXIT_QUESTIONS, VERB_STARTERS, LANDMARK_VERBS)) {
+                    BACK_PHRASES, CONTINUE_PHRASES, EXIT_QUESTIONS, VERB_STARTERS, LANDMARK_VERBS, STOP_PHRASES)) {
                 for (String phrase : phrases) {
                     words.addAll(Arrays.asList(phrase.split(" ")));
                 }

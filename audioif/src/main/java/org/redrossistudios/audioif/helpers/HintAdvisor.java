@@ -120,6 +120,33 @@ public final class HintAdvisor {
         return prefix + hintFor(target, shown, state, room, knownExits);
     }
 
+    /**
+     * The walkthrough's route to the room of the goal the last hint was about, if {@code place}
+     * names that room ("living room" for Living Room); else null. Lets "go to the living room"
+     * work right after a hint named it, before the player has been there.
+     */
+    public synchronized List<String> routeToHinted(String place, String room, int[] state) {
+        if (lastTarget < 0 || place == null || room == null) {
+            return null;
+        }
+        String goalRoom = index.steps.get(lastTarget).room;
+        if (goalRoom == null) {
+            return null;
+        }
+        List<String> name = Arrays.asList(roomName(goalRoom).toLowerCase(Locale.ROOT).split("[^a-z]+"));
+        boolean any = false;
+        for (String word : place.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+            if (word.isEmpty() || Arrays.asList("the", "a", "an", "room", "area", "place", "of").contains(word)) {
+                continue;
+            }
+            if (!name.contains(word)) {
+                return null;
+            }
+            any = true;
+        }
+        return any ? route(roomId(room, state), goalRoom, walkthroughExits, reverseExits) : null;
+    }
+
     /** True if the command is the one the last hint was about ("get the egg" matches "get egg"). */
     public synchronized boolean isHintedCommand(String command) {
         return lastTarget >= 0 && plain(command).equals(plain(index.steps.get(lastTarget).command));
