@@ -26,6 +26,7 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
+import org.redrossistudios.audioif.helpers.CommandInput;
 import org.redrossistudios.audioif.helpers.CommandNormalizer;
 import org.redrossistudios.audioif.helpers.CommandSuggester;
 import org.redrossistudios.audioif.helpers.FileScanner;
@@ -180,22 +181,13 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 return;
             }
             String spoken = matches.get(0);
-            if (pendingSuggestions != null) {
-                List<String> suggestions = pendingSuggestions;
-                pendingSuggestions = null;
-                int choice = CommandSuggester.parseChoice(spoken);
-                if (choice >= 1 && choice <= suggestions.size()) {
-                    commandField.setText(suggestions.get(choice - 1));
-                    handleButtonClick();
-                    return;
-                }
-                if (choice == suggestions.size() + 1
-                        || spoken.trim().equalsIgnoreCase("something else")) {
-                    speakThenListen("OK, what would you like to do?", false);
-                    return;
-                }
+            CommandInput.Result resolved = CommandInput.resolve(spoken, pendingSuggestions, gameDictionary);
+            pendingSuggestions = null;
+            if (resolved.reply != null) {
+                speakThenListen(resolved.reply, false);
+                return;
             }
-            commandField.setText(CommandNormalizer.normalize(spoken, gameDictionary));
+            commandField.setText(resolved.command);
             handleButtonClick();
         }
 

@@ -146,6 +146,7 @@ public final class CommandSuggester {
             return a.command.compareTo(b.command);
         });
         Set<String> seen = new HashSet<>();
+        seen.add(join(words));
         for (Candidate candidate : candidates) {
             if (seen.add(candidate.command)) {
                 result.add(candidate.command);

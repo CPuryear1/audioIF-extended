@@ -4,6 +4,7 @@ import android.app.ProgressDialog;
 import android.os.Handler;
 import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -15,6 +16,9 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
+import org.redrossistudios.audioif.helpers.CommandInput;
+import org.redrossistudios.audioif.helpers.CommandNormalizer;
+import org.redrossistudios.audioif.helpers.CommandSuggester;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
@@ -33,6 +37,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
+import java.util.List;
 
 public class TextModeActivity extends AppCompatActivity {
 
@@ -52,6 +57,8 @@ public class TextModeActivity extends AppCompatActivity {
     private SavedGameManager savedGameManager;
     private String filePath;
     private TextModeActivity activity;
+    private List<String> dictionaryWords;
+    private List<String> pendingSuggestions;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,6 +114,12 @@ public class TextModeActivity extends AppCompatActivity {
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
+            try {
+                dictionaryWords = executionControl.getMachine().getDictionaryWords();
+            } catch (Exception e) {
+                Log.w("CommandSuggester", "Could not read the game dictionary", e);
+                dictionaryWords = null;
+            }
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
@@ -118,8 +131,7 @@ public class TextModeActivity extends AppCompatActivity {
                 storyField.append(initialText);
             }
             else{
-                commandField.setText(" ");
-                handleButtonClick();
+                runCommand(" ", " ");
             }
 
         } catch (Exception ex) {
@@ -159,29 +171,59 @@ public class TextModeActivity extends AppCompatActivity {
     }
 
     private void handleButtonClick(){
-        String currentCommand = commandField.getText().toString();
-        String currentText = "";
-
-        executionControl.resumeWithInput(currentCommand);
-        currentText = getBufferText(screenModel);
-
-        if(currentText.length() > 1){
-            storyField.append("\n\n >" + commandField.getText() + "\n\n" + currentText);
+        String typed = commandField.getText().toString();
+        CommandInput.Result resolved = CommandInput.resolve(typed, pendingSuggestions, gameDictionary);
+        pendingSuggestions = null;
+        if (resolved.reply != null) {
+            storyField.append("\n\n >" + typed + "\n\n" + resolved.reply);
             footer.requestFocus();
             commandField.setText("");
+            return;
+        }
+        runCommand(typed, resolved.command);
+    }
 
-//            boolean isLandscape = this.getResources().getBoolean(R.bool.is_landscape);
-//            if(!isLandscape){
-//                commandField.requestFocus();
-//                InputMethodManager inputMethodManager = (InputMethodManager) this.getSystemService(this.INPUT_METHOD_SERVICE);
-//                inputMethodManager.toggleSoftInputFromWindow(this.getCurrentFocus().getWindowToken(), InputMethodManager.SHOW_FORCED, 0);
-//            }
+    private void runCommand(String typed, String command){
+        executionControl.resumeWithInput(command);
+        String currentText = getBufferText(screenModel);
+
+        if(currentText.length() > 1){
+            // Show what was actually sent when the normalizer or a suggestion changed it.
+            String echo = typed.trim().equalsIgnoreCase(command.trim()) ? typed : typed + "  [" + command + "]";
+            storyField.append("\n\n >" + echo + "\n\n" + currentText);
+            offerSuggestionsIfRejected(command, currentText);
+            footer.requestFocus();
+            commandField.setText("");
         }
         else{
-            commandField.setText(" ");
-            handleButtonClick();
+            runCommand(" ", " ");
         }
     }
+
+    // Same rejection handling as audio mode, shown as text; type a number to choose.
+    private void offerSuggestionsIfRejected(String command, String gameResponse) {
+        if (command.trim().isEmpty() || dictionaryWords == null
+                || !CommandSuggester.isRejection(gameResponse)) {
+            return;
+        }
+        List<String> suggestions = CommandSuggester.suggest(command, dictionaryWords, 3);
+        if (!suggestions.isEmpty()) {
+            pendingSuggestions = suggestions;
+            storyField.append("\n\n" + CommandSuggester.buildPrompt(suggestions));
+        }
+    }
+
+    private final CommandNormalizer.Dictionary gameDictionary = new CommandNormalizer.Dictionary() {
+        @Override
+        public boolean contains(String word) {
+            try {
+                return executionControl.getMachine().lookupToken(0, word) != 0;
+            } catch (Exception e) {
+                Log.w("CommandNormalizer", "Dictionary lookup failed for '" + word + "'", e);
+                return false;
+            }
+        }
+    };
 
     private String getBufferText(BufferedScreenModel screenModel){
         String result = "";
