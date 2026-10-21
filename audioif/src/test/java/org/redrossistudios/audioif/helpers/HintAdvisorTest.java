@@ -59,6 +59,20 @@ public class HintAdvisorTest {
     }
 
     @Test
+    public void skipsAGoalThatCanNoLongerBeDone() {
+        int[] state = {0, 0};
+        advisor.hint(state, "Path", null);
+        advisor.hint(state, "Path", null);
+        assertEquals("Try: open box.", advisor.hint(state, "Path", null));
+        assertEquals(false, advisor.isHintedCommand("take lamp"));
+        assertEquals(true, advisor.isHintedCommand("open the box"));
+        advisor.skipHintedIfStuck(state);
+        assertEquals(HintAdvisor.SKIPPED + "Your next step is somewhere else, at Hut. Say hint again for directions.",
+                advisor.hint(state, "Path", null));
+        assertEquals("From here, go east. Say hint again to hear what to do there.", advisor.hint(state, "Path", null));
+    }
+
+    @Test
     public void knownPlacesUseGoTo() {
         Map<String, Map<String, String>> known = new HashMap<>();
         known.put("Field", new HashMap<>());

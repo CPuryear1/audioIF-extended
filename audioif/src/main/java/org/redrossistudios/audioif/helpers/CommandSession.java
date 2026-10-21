@@ -664,6 +664,11 @@ public final class CommandSession {
         if (!isRejected(response)) {
             rememberNoun(command, response);
         }
+        HintAdvisor advisor = hints;
+        if (advisor != null && response != null && advisor.isHintedCommand(command)
+                && response.toLowerCase(Locale.ROOT).matches("(?s).*\\b(already|you have that)\\b.*")) {
+            advisor.skipHintedIfStuck(game.stateVector());
+        }
         return response;
     }
 
@@ -728,7 +733,9 @@ public final class CommandSession {
         }
         String lowerResponse = response.toLowerCase(Locale.ROOT).replace('\u2019', '\'');
         if (lowerResponse.contains("what do you want to") || lowerResponse.contains("noun missing")) {
-            result.note("Say the whole command, including what to use, like " + exampleFor(canonical) + ".");
+            String asked = askedCommand(lowerResponse, canonical);
+            result.note(asked != null ? asked
+                    : "Say the whole command, including what to use, like " + exampleFor(canonical) + ".");
             return;
         }
         Matcher use = USE_ON.matcher(canonical);
@@ -779,6 +786,36 @@ public final class CommandSession {
             }
         }
         return options;
+    }
+
+    private static final Pattern ASKED = Pattern.compile(
+            "what do you want to ([a-z][a-z ]*?)(?: (to|with|in|into|on|onto|at|from|under|behind|through|off))?\\?");
+
+    /**
+     * Follows the game's own question: "What do you want to tie the rope to?" ->
+     * "Just name it, or say the whole command, like tie the rope to the railing."
+     * Null if the question can't be read.
+     */
+    private String askedCommand(String lowerResponse, String canonical) {
+        Matcher asked = ASKED.matcher(lowerResponse);
+        if (!asked.find()) {
+            return null;
+        }
+        String action = asked.group(1).trim();
+        String preposition = asked.group(2);
+        String example = null;
+        for (String thing : visibleThings()) {
+            if (!(" " + action + " ").contains(" " + thing + " ")) {
+                example = thing;
+                break;
+            }
+        }
+        String start = action + (preposition != null ? " " + preposition : "");
+        if (example == null) {
+            return "Just say what, or say the whole command, starting " + start + ".";
+        }
+        return "Just say what, like " + example + ", or say the whole command, like " + start + " the "
+                + example + ".";
     }
 
     private static String exampleFor(String canonical) {
@@ -1038,7 +1075,6 @@ public final class CommandSession {
                 candidates.add(verb);
             }
         }
-        candidates.addAll(Arrays.asList("help", "hint", "undo"));
         return new SpeechMatcher.Vocabulary() {
             @Override
             public boolean knows(String word) {
@@ -1102,6 +1138,11 @@ public final class CommandSession {
      * concrete commands to try, chosen from things they haven't tried yet.
      */
     String situation() {
+        // After a resume the last text is the recap, not the room, so look quietly first.
+        if (room != null && (roomDescription == null || roomDescription.trim().split("\\s+").length < 8
+                || !roomDescription.toLowerCase(Locale.ROOT).contains(room.toLowerCase(Locale.ROOT)))) {
+            send("look", new Result());
+        }
         StringBuilder text = new StringBuilder();
         if (room != null) {
             text.append("You're at ").append(room).append(". ");

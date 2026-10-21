@@ -52,6 +52,10 @@ public final class HintAdvisor {
     private final Map<String, Map<String, String>> reverseExits = new LinkedHashMap<>();
     private int lastTarget = -2;
     private int level;
+    // Goals the player can no longer do the walkthrough's way (Zork's egg, once broken, is a different object).
+    private final Set<Integer> skipped = new HashSet<>();
+    private boolean justSkipped;
+    static final String SKIPPED = "That step seems to be done another way already, so here's the next one. ";
 
     public HintAdvisor(WalkthroughIndex index) {
         this.index = index;
@@ -100,10 +104,12 @@ public final class HintAdvisor {
      * directions; may be null.
      */
     public synchronized String hint(int[] state, String room, Map<String, Map<String, String>> knownExits) {
-        int target = index.nextGoal(state);
+        int target = index.nextGoal(state, skipped);
+        String prefix = justSkipped ? SKIPPED : "";
+        justSkipped = false;
         if (target < 0) {
             lastTarget = target;
-            return ALL_DONE;
+            return prefix + ALL_DONE;
         }
         if (target != lastTarget) {
             lastTarget = target;
@@ -111,6 +117,33 @@ public final class HintAdvisor {
         }
         int shown = level;
         level = Math.min(level + 1, 2);
+        return prefix + hintFor(target, shown, state, room, knownExits);
+    }
+
+    /** True if the command is the one the last hint was about ("get the egg" matches "get egg"). */
+    public synchronized boolean isHintedCommand(String command) {
+        return lastTarget >= 0 && plain(command).equals(plain(index.steps.get(lastTarget).command));
+    }
+
+    /**
+     * The player ran the hinted command and the game said it was already done, yet the state
+     * doesn't match the walkthrough's: skip that goal so hints don't repeat it forever.
+     */
+    public synchronized void skipHintedIfStuck(int[] state) {
+        if (lastTarget >= 0 && state != null && !index.isDone(lastTarget, state)) {
+            skipped.add(lastTarget);
+            justSkipped = true;
+        }
+    }
+
+    private static String plain(String command) {
+        String text = key(command.toLowerCase(Locale.ROOT).replaceAll("\\b(the|a|an)\\b", " ")
+                .replaceAll("\\s+", " ").trim());
+        return text.replaceFirst("^(take|pick up) ", "get ").replaceFirst("^examine ", "x ");
+    }
+
+    private String hintFor(int target, int shown, int[] state, String room,
+                           Map<String, Map<String, String>> knownExits) {
         WalkthroughIndex.Step goal = index.steps.get(target);
         // Rooms can share a name (Zork I has two Clearings and several Forests), so compare ids.
         String at = roomId(room, state);

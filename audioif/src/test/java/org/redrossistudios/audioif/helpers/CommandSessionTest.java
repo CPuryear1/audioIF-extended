@@ -280,6 +280,48 @@ public class CommandSessionTest {
     }
 
     @Test
+    public void hintSkipsAStepTheGameSaysIsAlreadyDone() {
+        game.words.addAll(Arrays.asList("get", "egg"));
+        game.replies.put("take the egg", "You already have that!");
+        game.state = new int[] {0};
+        session.setHintAdvisor(new HintAdvisor(new WalkthroughIndex(Arrays.asList(
+                new WalkthroughIndex.Step("get egg", "Field", null, new int[] {0}, new int[] {1}),
+                new WalkthroughIndex.Step("open box", "Field", null, new int[] {0}, new int[] {2})))));
+        session.handle("hint");
+        session.handle("hint");
+        assertEquals("Try: get egg.", session.handle("hint").text());
+        session.handle("take the egg");
+        assertTrue(session.handle("hint").text().startsWith(HintAdvisor.SKIPPED));
+    }
+
+    @Test
+    public void speechDoesNotTurnGameVerbsIntoHint() {
+        game.words.addAll(Arrays.asList("hang", "rope"));
+        session.handleSpeech(Arrays.asList("hang the rope"));
+        assertEquals("hang the rope", game.sent.get(0));
+    }
+
+    @Test
+    public void followUpNoteMatchesTheGamesQuestion() {
+        game.words.addAll(Arrays.asList("tie", "rope", "railing"));
+        game.replies.put("tie the rope", "What do you want to tie the rope to?");
+        game.things.add("railing");
+        String text = session.handle("tie the rope").text();
+        assertTrue(text, text.contains("like tie the rope to the lamp"));
+        assertFalse(text, text.contains("with the item"));
+    }
+
+    @Test
+    public void helpAfterResumeLooksAtTheRoomFirst() {
+        game.replies.put("look", "Field\nYou are in a field. There is a lamp here. A narrow trail leads north.");
+        CommandSession resumed = new CommandSession(game);
+        resumed.start("There's nothing special about the canary.");
+        String text = resumed.handle("help").text();
+        assertTrue(text, text.contains("the lamp"));
+        assertEquals(Arrays.asList("look"), game.sent);
+    }
+
+    @Test
     public void pronounFallsBackToLastNoun() {
         session.handle("open the box");
         CommandSession.Result result = session.handle("read it");
