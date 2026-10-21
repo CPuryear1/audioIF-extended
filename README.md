@@ -128,6 +128,11 @@ Requirements: JDK 17 or newer, and an Android SDK with platform 36 and build-too
 
 The APK is written to `audioif/build/outputs/apk/debug/`.
 
+### Testing
+- Unit tests run on the desktop JVM: `./gradlew :audioif:testDebugUnitTest --tests "*CommandNormalizerTest"` (or any other `*Test` class in `audioif/src/test`). Pass `--tests` filters: running the whole task also starts the play harness and walkthrough replay setup, which is slow.
+- `WalkthroughReplayTest` and the play harness are described under "Changes in this fork" above.
+- `.github/copilot-instructions.md` lists the exact commands, workflow and project notes for contributors and coding agents.
+
 ### Walkthrough hints
 
 The hints come from the IF Archive's step-by-step Zork walkthroughs (`solutions/Sols2.zip`). They aren't stored in this repository. For a personal build, fetch them before building:
