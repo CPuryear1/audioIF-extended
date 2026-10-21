@@ -81,8 +81,20 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private String filePath;
     private MainActivity activity;
 
+    private static final int MAX_FAILED_LISTENS = 3;
+    private int failedListens = 0;
+    private boolean paused = false;
+
+    private void createRecognizer() {
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+        }
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.setRecognitionListener(recognitionListener);
+    }
+
     private void startVoiceInput() {
-        if (speechRecognizer == null || isFinishing()) {
+        if (speechRecognizer == null || isFinishing() || paused) {
             return;
         }
         isFileScannerInput = false;
@@ -165,7 +177,12 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                         TextToSpeech.QUEUE_ADD, null, "permission-error");
                 return;
             }
-            speakThenListen("Sorry, I didn't catch that. Please try again.", false);
+            if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
+                    || error == SpeechRecognizer.ERROR_SERVER_DISCONNECTED) {
+                // Restarting a recognizer in this state just fails again, so start fresh.
+                createRecognizer();
+            }
+            retryOrPause();
         }
 
         @Override
@@ -176,9 +193,10 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             isListening = false;
             ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
             if (matches == null || matches.isEmpty()) {
-                speakThenListen("Sorry, I didn't catch that. Please try again.", false);
+                retryOrPause();
                 return;
             }
+            failedListens = 0;
             handleInput(matches.get(0));
         }
 
@@ -188,6 +206,19 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         @Override
         public void onEvent(int eventType, Bundle params) { }
     };
+
+    // Asks again, but stops after a few misses in a row instead of looping forever.
+    private void retryOrPause() {
+        if (++failedListens < MAX_FAILED_LISTENS) {
+            speakThenListen("Sorry, I didn't catch that. Please try again.", false);
+            return;
+        }
+        failedListens = 0;
+        pendingUtteranceId = null;
+        tts.speak("I'll stop listening for now. Tap the story when you're ready.",
+                TextToSpeech.QUEUE_ADD, null, "listen-paused");
+        setStatus("Paused \u2014 tap the story to listen");
+    }
 
     private final UtteranceProgressListener utteranceProgressListener = new UtteranceProgressListener() {
         @Override
@@ -229,8 +260,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         tts.setOnUtteranceProgressListener(utteranceProgressListener);
 
         if (SpeechRecognizer.isRecognitionAvailable(this)) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-            speechRecognizer.setRecognitionListener(recognitionListener);
+            createRecognizer();
         } else {
             Log.e("SpeechRecognizer", "Speech recognition is not available on this device");
         }
@@ -313,7 +343,20 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     @Override
     protected void onPause() {
         saveProgress();
+        // The microphone isn't available in the background; listening there only fails.
+        paused = true;
+        stopVoiceInput();
         super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        paused = false;
+        failedListens = 0;
+        if (session != null && pendingUtteranceId == null && !isListening && tts != null && !tts.isSpeaking()) {
+            startVoiceInput();
+        }
     }
 
     @Override
