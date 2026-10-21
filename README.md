@@ -88,6 +88,8 @@ The core of this application uses the ZMPP interpreter project: https://sourcefo
   - Output goes to `audioif/build/play/`: `transcript.md` (with `[sent: …]` and **REJECTED** markers), `transcript.json`, `latest.txt` and `summary.txt` (number of inputs and rejected inputs). App notes appear as "(app)" lines.
   - A replay of a 148-command Zork I session played by an AI agent went from 78 rejected inputs to 15 after these changes. A 180-command Zork II session went from 35 rejected inputs to 13.
   - Without `-Pplay` the test is skipped.
+  - If the walkthrough for the game has been fetched (see "Walkthrough hints"), the harness loads hints too, so "help" lines show the hints a player would hear. The replayed index is cached in `audioif/build/play/hints`.
+- `WalkthroughReplayTest` replays each fetched walkthrough with several random seeds and writes `audioif/build/play/walkthrough-<game>.txt` (steps covered, retries and goals per seed). It checks that every step is replayed and that each game has enough goals. It's skipped for games whose walkthrough hasn't been fetched. The other unit tests use made-up walkthroughs only.
 
 ### Android Gradle Plugin upgrade
 The original project used AGP 3.2.0, which can't parse the manifest `<queries>` element. Android 11+ needs that element to let the app find the speech recognition service (`android.speech.RecognitionService`), so the build was upgraded to the latest stable AGP:
