@@ -1,8 +1,10 @@
 package org.redrossistudios.audioif.helpers;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -63,8 +65,9 @@ public final class WalkthroughIndex {
         }
     }
 
-    static final int FORMAT = 5;
+    static final int FORMAT = 7;
     private static final String[] PROBES = {"n", "s", "e", "w", "ne", "nw", "se", "sw", "u", "d"};
+    private static final int MAX_MAPPED_ROOMS = 400;
     private static final Pattern DARK = Pattern.compile("(?is).*\\b(pitch black|too dark)\\b.*");
     private static final int MAX_REPEAT = 12;
     private static final int[] REWIND_BACK = {0, 0, 1, 1, 2, 2, 4, 4, 8, 8};
@@ -230,7 +233,7 @@ public final class WalkthroughIndex {
             WalkthroughParser.Step step = walkthrough.get(i);
             String room = roomsBefore.get(i);
             if (room != null && !run.exits.containsKey(room)) {
-                run.exits.put(room, probeExits(player, room));
+                explore(player, room, run.exits);
             }
             String reply = send(step, player);
             String now = player.room();
@@ -348,6 +351,42 @@ public final class WalkthroughIndex {
             run.values.remove(last);
             run.replies.remove(last);
         }
+    }
+
+    /**
+     * Maps every room reachable from {@code start} that isn't mapped yet, walking to each from
+     * a snapshot and trying every direction there, then puts the game back as it was. Players
+     * wander off the walkthrough's path, and hints need a way back from wherever they are.
+     */
+    private static void explore(Player player, String start, Map<String, Map<String, String>> exits) {
+        Object base = player.snapshot();
+        Map<String, List<String>> pathTo = new HashMap<>();
+        Deque<String> queue = new ArrayDeque<>();
+        pathTo.put(start, new ArrayList<>());
+        queue.add(start);
+        while (!queue.isEmpty() && exits.size() < MAX_MAPPED_ROOMS) {
+            String id = queue.poll();
+            List<String> path = pathTo.get(id);
+            if (!exits.containsKey(id)) {
+                player.restore(base);
+                for (String move : path) {
+                    player.send(move);
+                }
+                if (!id.equals(player.room())) {
+                    continue;
+                }
+                exits.put(id, probeExits(player, id));
+            }
+            for (Map.Entry<String, String> exit : exits.get(id).entrySet()) {
+                if (!pathTo.containsKey(exit.getValue())) {
+                    List<String> longer = new ArrayList<>(path);
+                    longer.add(exit.getKey());
+                    pathTo.put(exit.getValue(), longer);
+                    queue.add(exit.getValue());
+                }
+            }
+        }
+        player.restore(base);
     }
 
     // Tries every direction from {@code room}, undoing each, and returns where they lead.

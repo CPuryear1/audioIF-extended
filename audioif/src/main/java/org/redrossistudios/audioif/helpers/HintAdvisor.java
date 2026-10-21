@@ -73,6 +73,25 @@ public final class HintAdvisor {
                         .putIfAbsent(exit.getKey(), exit.getValue());
             }
         }
+        for (Map<String, Map<String, String>> map : Arrays.asList(walkthroughExits, reverseExits)) {
+            for (Map.Entry<String, Map<String, String>> room : map.entrySet()) {
+                countId(room.getKey());
+                for (String to : room.getValue().values()) {
+                    countId(to);
+                }
+            }
+        }
+    }
+
+    private final Map<String, Set<String>> idsByName = new HashMap<>();
+
+    private void countId(String id) {
+        idsByName.computeIfAbsent(roomName(id).toLowerCase(Locale.ROOT), k -> new HashSet<>()).add(id);
+    }
+
+    private boolean unique(String name) {
+        Set<String> ids = name == null ? null : idsByName.get(name.toLowerCase(Locale.ROOT));
+        return ids == null || ids.size() <= 1;
     }
 
     /**
@@ -93,7 +112,9 @@ public final class HintAdvisor {
         int shown = level;
         level = Math.min(level + 1, 2);
         WalkthroughIndex.Step goal = index.steps.get(target);
-        boolean here = goal.room == null || room == null || goal.room.equalsIgnoreCase(room);
+        // Rooms can share a name (Zork I has two Clearings and several Forests), so compare ids.
+        String at = roomId(room, state);
+        boolean here = goal.room == null || at == null || goal.room.equalsIgnoreCase(at);
         if (here) {
             switch (shown) {
                 case 0:
@@ -104,14 +125,31 @@ public final class HintAdvisor {
                     return "Try: " + goal.command + ".";
             }
         }
+        String place = roomName(goal.room);
         switch (shown) {
             case 0:
-                return "Your next step is somewhere else, at " + goal.room + "." + " Say help again for directions.";
+                return "Your next step is somewhere else, at " + place + "." + " Say help again for directions.";
             case 1:
-                return directions(room, goal.room, knownExits) + " Say help again to hear what to do there.";
+                return directions(at, goal.room, knownExits) + " Say help again to hear what to do there.";
             default:
-                return "At " + goal.room + ", try: " + goal.command + ". " + directions(room, goal.room, knownExits);
+                return "At " + place + ", try: " + goal.command + ". " + directions(at, goal.room, knownExits);
         }
+    }
+
+    /**
+     * The room's name plus its location object ("Clearing#147"), from global 0, which holds the
+     * player's location in version 1-3 games. Plain name if the state has no globals.
+     */
+    public static String roomId(String name, int[] state) {
+        if (name == null || state == null || state.length < GameStateReader.GLOBALS_FROM_END) {
+            return name;
+        }
+        return name + "#" + state[state.length - GameStateReader.GLOBALS_FROM_END];
+    }
+
+    static String roomName(String id) {
+        int hash = id == null ? -1 : id.lastIndexOf('#');
+        return hash < 0 ? id : id.substring(0, hash);
     }
 
     // "tie chest to rope" -> "Try doing something with the chest and the rope."
@@ -137,10 +175,14 @@ public final class HintAdvisor {
     }
 
     private String directions(String from, String to, Map<String, Map<String, String>> knownExits) {
-        if (knownExits != null && route(from, to, knownExits) != null) {
-            return "You've been there: say go to " + to + ".";
+        String fromName = roomName(from);
+        String toName = roomName(to);
+        // The player's map only knows names, so it's only trusted for names that are unique.
+        if (knownExits != null && unique(fromName) && unique(toName)
+                && route(fromName, toName, knownExits) != null) {
+            return "You've been there: say go to " + toName + ".";
         }
-        List<String> path = route(from, to, knownExits, walkthroughExits, reverseExits);
+        List<String> path = route(from, to, walkthroughExits, reverseExits);
         if (path == null) {
             return "I don't know the way from here. Try to retrace your steps.";
         }

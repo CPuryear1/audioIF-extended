@@ -64,7 +64,7 @@ public final class HeadlessGame {
             }
             return new WalkthroughIndex.Player() {
                 public String send(String command) { return game.send(command); }
-                public String room() { return game.currentRoom(); }
+                public String room() { return HintAdvisor.roomId(game.currentRoom(), game.stateVector()); }
                 public int[] state() { return game.stateVector(); }
                 public Object snapshot() { return game.snapshot(); }
                 public void restore(Object snapshot) { game.restore(snapshot); }
