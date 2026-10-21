@@ -33,7 +33,6 @@ import org.zmpp.windowing.StatusLine;
 import org.zmpp.media.Resolution;
 import org.zmpp.windowing.ScreenModel6;
 import org.zmpp.windowing.ScreenModel;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
 import org.zmpp.base.DefaultMemory;
@@ -382,16 +381,6 @@ public class MachineImpl implements Machine, DrawingArea {
                               getZCharDecoder(), encoder).lookup(token);
   }
   /** {@inheritDoc} */
-  public List<String> getDictionaryWords() {
-    // A negative entry count marks an unsorted dictionary; the magnitude is the size.
-    final int n = Math.abs(getDictionary().getNumberOfEntries());
-    final List<String> words = new ArrayList<String>(n);
-    for (int i = 0; i < n; i++) {
-      words.add(getDictionary().getEntryWord(i));
-    }
-    return words;
-  }
-  /** {@inheritDoc} */
   public String getDictionaryDelimiters() {
     // Retrieve the defined separators
     final StringBuilder separators = new StringBuilder();
@@ -653,24 +642,6 @@ public class MachineImpl implements Machine, DrawingArea {
     return null;
   }
 
-  /** {@inheritDoc} */
-  public PortableGameState captureInputState() {
-    final PortableGameState state = new PortableGameState();
-    // While waiting for input the PC still points at the read instruction.
-    state.captureMachineState(this, getPC());
-    return state;
-  }
-
-  /** {@inheritDoc} */
-  public void restoreInputState(final PortableGameState state) {
-    restart(false);
-    state.transferStateToMachine(this);
-    // transferStateToMachine() skips past a save instruction's store/branch
-    // byte; here we want to re-execute the read instruction itself.
-    setPC(state.getProgramCounter());
-    runstate = MachineRunState.RUNNING;
-  }
-
   // ***********************************************************************
   // ***** Private methods
   // **************************************
@@ -737,7 +708,9 @@ public class MachineImpl implements Machine, DrawingArea {
    * Restarts the VM.
    * @param resetScreenModel true if screen model should be reset
    */
-  private void restart(final boolean resetScreenModel) {
+  // audioIF-extended: was private; AudioIfExtensions.restoreInputState() needs a
+  // restart that keeps the screen model, like restore() and restore_undo().
+  void restart(final boolean resetScreenModel) {
     // Transcripting and fixed font bits survive the restart
     final StoryFileHeader fileHeader = getFileHeader();
     final boolean fixedFontForced =

@@ -5,6 +5,7 @@ import org.zmpp.base.DefaultMemory;
 import org.zmpp.iff.DefaultFormChunk;
 import org.zmpp.vm.Machine;
 import org.zmpp.vm.MachineRunState;
+import org.zmpp.vm.AudioIfExtensions;
 import org.zmpp.vm.PortableGameState;
 import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
@@ -64,7 +65,7 @@ public final class ZGame implements CommandSession.Game {
     public List<String> dictionaryWords() {
         if (dictionaryWords == null) {
             try {
-                dictionaryWords = executionControl.getMachine().getDictionaryWords();
+                dictionaryWords = AudioIfExtensions.getDictionaryWords(executionControl.getMachine());
             } catch (RuntimeException e) {
                 dictionaryWords = Collections.emptyList();
             }
@@ -80,7 +81,7 @@ public final class ZGame implements CommandSession.Game {
     @Override
     public Object snapshot() {
         try {
-            return executionControl.getMachine().captureInputState();
+            return AudioIfExtensions.captureInputState(executionControl.getMachine());
         } catch (RuntimeException e) {
             return null;
         }
@@ -92,7 +93,7 @@ public final class ZGame implements CommandSession.Game {
             return false;
         }
         try {
-            executionControl.getMachine().restoreInputState((PortableGameState) snapshot);
+            AudioIfExtensions.restoreInputState(executionControl.getMachine(), (PortableGameState) snapshot);
             executionControl.run();
             readOutput();
             return true;
@@ -111,7 +112,7 @@ public final class ZGame implements CommandSession.Game {
             if (runState == null || !runState.isReadLine()) {
                 return null;
             }
-            return executionControl.getMachine().captureInputState().exportToFormChunk().getBytes();
+            return AudioIfExtensions.captureInputState(executionControl.getMachine()).exportToFormChunk().getBytes();
         } catch (RuntimeException e) {
             return null;
         }
@@ -131,7 +132,7 @@ public final class ZGame implements CommandSession.Game {
                 return false;
             }
             Machine machine = executionControl.getMachine();
-            PortableGameState current = machine.captureInputState();
+            PortableGameState current = AudioIfExtensions.captureInputState(machine);
             if (state.getRelease() != current.getRelease() || state.getChecksum() != current.getChecksum()
                     || !state.getSerialNumber().equals(current.getSerialNumber())
                     || state.getDynamicMemoryDump() == null
