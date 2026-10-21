@@ -33,6 +33,7 @@ import org.zmpp.windowing.StatusLine;
 import org.zmpp.media.Resolution;
 import org.zmpp.windowing.ScreenModel6;
 import org.zmpp.windowing.ScreenModel;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
 import org.zmpp.base.DefaultMemory;
@@ -379,6 +380,16 @@ public class MachineImpl implements Machine, DrawingArea {
     }
     return new UserDictionary(getMemory(), dictionaryAddress,
                               getZCharDecoder(), encoder).lookup(token);
+  }
+  /** {@inheritDoc} */
+  public List<String> getDictionaryWords() {
+    // A negative entry count marks an unsorted dictionary; the magnitude is the size.
+    final int n = Math.abs(getDictionary().getNumberOfEntries());
+    final List<String> words = new ArrayList<String>(n);
+    for (int i = 0; i < n; i++) {
+      words.add(getDictionary().getEntryWord(i));
+    }
+    return words;
   }
   /** {@inheritDoc} */
   public String getDictionaryDelimiters() {

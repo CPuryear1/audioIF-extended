@@ -26,6 +26,7 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.Alert;
 import org.redrossistudios.audioif.helpers.CommandNormalizer;
+import org.redrossistudios.audioif.helpers.CommandSuggester;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
@@ -45,6 +46,7 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
@@ -62,6 +64,9 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private boolean isListening = false;
     private int utteranceCounter = 0;
     private volatile String pendingUtteranceId;
+    private List<String> dictionaryWords;
+    // Suggestions offered after a rejected command; non-null while waiting for a numbered choice.
+    private List<String> pendingSuggestions;
     private TextToSpeech tts;
     private InputStream storyIs;
     private FileScanner fileScanner;
@@ -172,7 +177,23 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 speakThenListen("Sorry, I didn't catch that. Please try again.", false);
                 return;
             }
-            commandField.setText(CommandNormalizer.normalize(matches.get(0), gameDictionary));
+            String spoken = matches.get(0);
+            if (pendingSuggestions != null) {
+                List<String> suggestions = pendingSuggestions;
+                pendingSuggestions = null;
+                int choice = CommandSuggester.parseChoice(spoken);
+                if (choice >= 1 && choice <= suggestions.size()) {
+                    commandField.setText(suggestions.get(choice - 1));
+                    handleButtonClick();
+                    return;
+                }
+                if (choice == suggestions.size() + 1
+                        || spoken.trim().equalsIgnoreCase("something else")) {
+                    speakThenListen("OK, what would you like to do?", false);
+                    return;
+                }
+            }
+            commandField.setText(CommandNormalizer.normalize(spoken, gameDictionary));
             handleButtonClick();
         }
 
@@ -239,6 +260,12 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
+            try {
+                dictionaryWords = executionControl.getMachine().getDictionaryWords();
+            } catch (Exception e) {
+                Log.w("CommandSuggester", "Could not read the game dictionary", e);
+                dictionaryWords = null;
+            }
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
@@ -377,6 +404,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
     private void handleButtonClick(){
+        pendingSuggestions = null;
         String currentCommand = commandField.getText().toString();
         String currentText = "";
 
@@ -388,11 +416,26 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             commandField.setText("");
             commandField.setVisibility(View.GONE);
             speakThenListen(storyField.getText().toString(), true);
+            offerSuggestionsIfRejected(currentCommand, currentText);
         }
         else{
             commandField.setText(" ");
             handleButtonClick();
         }
+    }
+
+    // If the game rejected the command, queue a numbered list of similar commands after the response.
+    private void offerSuggestionsIfRejected(String command, String gameResponse) {
+        if (command.trim().isEmpty() || dictionaryWords == null
+                || !CommandSuggester.isRejection(gameResponse)) {
+            return;
+        }
+        List<String> suggestions = CommandSuggester.suggest(command, dictionaryWords, 3);
+        if (suggestions.isEmpty()) {
+            return;
+        }
+        pendingSuggestions = suggestions;
+        speakThenListen(CommandSuggester.buildPrompt(suggestions), false);
     }
 
     private String getBufferText(BufferedScreenModel screenModel){

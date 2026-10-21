@@ -29,6 +29,7 @@
 package org.zmpp.vm;
 
 import java.io.Serializable;
+import java.util.List;
 
 import org.zmpp.base.Memory;
 import org.zmpp.base.StoryFileHeader;
@@ -111,6 +112,12 @@ extends ObjectTree, Input, Output, Cpu, Memory, IZsciiEncoding, Serializable {
    * @return dictionary delimiters
    */
   String getDictionaryDelimiters();
+
+  /**
+   * Returns all words in the story's main dictionary, decoded to strings.
+   * @return the dictionary words
+   */
+  List<String> getDictionaryWords();
 
   // **********************************************************************
   // **** Encoding functions
