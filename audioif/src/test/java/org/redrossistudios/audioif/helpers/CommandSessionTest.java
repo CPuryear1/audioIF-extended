@@ -280,6 +280,63 @@ public class CommandSessionTest {
     }
 
     @Test
+    public void runningAwayGoesBack() {
+        session.handle("go north");
+        session.handle("run away from the troll");
+        assertEquals(Arrays.asList("N", "S"), game.sent);
+        assertEquals("Field", game.room);
+    }
+
+    @Test
+    public void stopPausesListening() {
+        CommandSession.Result result = session.handleSpeech(Arrays.asList("stop"));
+        assertTrue(result.pauseListening);
+        assertTrue(game.sent.isEmpty());
+    }
+
+    @Test
+    public void loneHintMishearingsMeanHint() {
+        CommandSession.Result result = session.handleSpeech(Arrays.asList("tent", "can't", "tint"));
+        assertEquals(CommandSession.HINT_TEXT, result.text());
+        assertTrue(game.sent.isEmpty());
+    }
+
+    @Test
+    public void swingingASwordAtACreatureAttacksIt() {
+        game.words.addAll(Arrays.asList("swing", "sword", "troll", "attack"));
+        CommandSession fight = new CommandSession(game);
+        fight.start("Field\nA nasty-looking troll blocks the way.");
+        String text = fight.handle("swing the sword").text();
+        assertEquals(Arrays.asList("attack the troll with the sword"), game.sent);
+        assertTrue(text, text.contains("To fight, say attack the troll with the sword."));
+    }
+
+    @Test
+    public void useAThingSuggestsWhatItIsFor() {
+        game.words.addAll(Arrays.asList("on", "off"));
+        CommandSession.Result result = session.handle("use the lamp");
+        assertEquals("turn on the lamp", result.suggestions.get(0));
+    }
+
+    @Test
+    public void examiningTheRoomLooks() {
+        game.replies.put("look", "Field\nYou are in a field.");
+        session.handle("examine the room");
+        assertEquals(Arrays.asList("look"), game.sent);
+    }
+
+    @Test
+    public void goToWorksForTheRoomTheHintNamed() {
+        game.state = new int[] {0};
+        session.setHintAdvisor(new HintAdvisor(new WalkthroughIndex(Arrays.asList(
+                new WalkthroughIndex.Step("n", "Field", "Path", new int[0], new int[0]),
+                new WalkthroughIndex.Step("open box", "Path", null, new int[] {0}, new int[] {1})))));
+        session.handle("hint");
+        session.handle("go to the path");
+        assertEquals("Path", game.room);
+    }
+
+    @Test
     public void hintSkipsAStepTheGameSaysIsAlreadyDone() {
         game.words.addAll(Arrays.asList("get", "egg"));
         game.replies.put("take the egg", "You already have that!");

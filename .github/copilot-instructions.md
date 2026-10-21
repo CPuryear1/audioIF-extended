@@ -53,6 +53,7 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
 - "help" describes the current situation (`CommandSession.situation`: room, visible things, exits, things to try); "hint" gives walkthrough hints; "how do I play" reads the guide. Fetch walkthroughs before building an APK for the phone, or hints are missing.
 - Some walkthrough goals become impossible (Zork I's broken egg is a different object). `HintAdvisor.skipHintedIfStuck` skips a goal when the hinted command gets an "already…" reply but the state doesn't match.
 - The app's own words (help, hint, undo) must not be `SpeechMatcher` candidates, or game verbs such as "hang" get corrected to them.
+- Zork's "swing the sword" only says "Whoosh!"; `CommandSession` turns it into an attack only while the object tree (`thingsHere`) holds a creature, so a dead troll isn't attacked again.
 - Speech: on ERROR_CLIENT, busy or disconnected errors the recognizer is recreated. Listening pauses after 3 misses in a row, or while the app is in the background.
 
 ## Current state and open ideas (October 2026)
