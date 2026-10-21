@@ -1,0 +1,1127 @@
+package org.redrossistudios.audioif.helpers;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Turns what the player said or typed into game commands and app replies.
+ * Shared by audio mode, text mode and the play harness so all behave the same.
+ *
+ * On top of {@link CommandNormalizer} and {@link CommandSuggester} it adds
+ * things old parsers lack: several commands in one sentence ("open the mailbox
+ * and take the leaflet"), "twice", "go back", "keep going", "go to the
+ * kitchen" (walks a remembered route), "undo", "help", "hint", guessing what
+ * "it" means, and friendlier replies when a command is rejected.
+ */
+public final class CommandSession {
+
+    /** The running game. */
+    public interface Game extends CommandNormalizer.Dictionary {
+        /** Sends a command and returns the game's reply. */
+        String send(String command);
+
+        List<String> dictionaryWords();
+
+        /** The current room from the status line, or null if unknown. */
+        String currentRoom();
+
+        /** Captures the state for undo, or returns null if unsupported. */
+        Object snapshot();
+
+        /** Restores a {@link #snapshot()}; returns false on failure. */
+        boolean restore(Object snapshot);
+    }
+
+    /** One step of the reply: a command sent with the game's response, and/or a note from the app. */
+    public static final class Exchange {
+        /** The command sent to the game, or null for app-only notes. */
+        public final String command;
+        /** The game's reply, or null. */
+        public final String response;
+        /** A note from the app, or null. */
+        public final String note;
+
+        Exchange(String command, String response, String note) {
+            this.command = command;
+            this.response = response;
+            this.note = note;
+        }
+    }
+
+    public static final class Result {
+        public final List<Exchange> exchanges = new ArrayList<>();
+        /** True if the game rejected a command. */
+        public boolean rejected;
+        /** Suggestions offered for a numbered choice, empty if none. */
+        public List<String> suggestions = Collections.emptyList();
+
+        public List<String> sentCommands() {
+            List<String> sent = new ArrayList<>();
+            for (Exchange exchange : exchanges) {
+                if (exchange.command != null) {
+                    sent.add(exchange.command);
+                }
+            }
+            return sent;
+        }
+
+        /** Game responses and notes, in order, separated by blank lines. */
+        public String text() {
+            StringBuilder sb = new StringBuilder();
+            for (Exchange exchange : exchanges) {
+                for (String part : new String[]{exchange.response, exchange.note}) {
+                    if (part != null && !part.trim().isEmpty()) {
+                        if (sb.length() > 0) {
+                            sb.append("\n\n");
+                        }
+                        sb.append(part.trim());
+                    }
+                }
+            }
+            return sb.toString();
+        }
+
+        void note(String note) {
+            exchanges.add(new Exchange(null, null, note));
+        }
+    }
+
+    public static final String ASK_AGAIN = "OK, what would you like to do?";
+
+    static final String HELP_TEXT = "Say or type short commands, for example: look, inventory, "
+            + "go north, take the lamp, open the mailbox, read the leaflet. "
+            + "You can chain them: open the mailbox and take the leaflet. "
+            + "Say go back to retrace your last step, keep going to continue the same way, "
+            + "or go to a place you have already visited, such as go to the kitchen. "
+            + "Say again to repeat a command, undo to take back your last turn, "
+            + "and save or restore to keep your progress.";
+
+    static final String HINT_TEXT = "This game has no built-in hints. Try examining everything "
+            + "you find, reading anything with writing on it, opening containers, "
+            + "and trying every exit. Say help for a list of commands.";
+
+    static final String QUESTION_NOTE = "The game can't answer questions. Try look, "
+            + "examine something, or inventory.";
+
+    static final String REPHRASE_NOTE = "Try a short command that starts with a verb, "
+            + "like take the lamp or open the door.";
+
+    private static final int MAX_UNDO = 10;
+    private static final int MAX_REPEAT = 5;
+    private static final int MAX_WALK = 25;
+
+    private static final Set<String> HELP_PHRASES = canonicalSet("help", "help me", "commands",
+            "what can i do", "what can i say", "how do i play", "instructions", "list the commands",
+            "what are the commands");
+    private static final Set<String> HINT_PHRASES = canonicalSet("hint", "hints", "give me a hint",
+            "i need a hint", "i am stuck", "clue", "give me a clue", "any hints", "what should i do",
+            "what do i do", "what now", "now what", "what next", "what do i do next", "what should i do next",
+            "i do not know what to do");
+    private static final Set<String> UNDO_PHRASES = canonicalSet("undo", "undo that", "undo the last move",
+            "undo last move", "undo the last turn", "take that back", "take back", "oops undo");
+    private static final Set<String> BACK_PHRASES = canonicalSet("go back", "back", "return", "go back the way i came",
+            "retrace the steps", "go back where i came from", "go back to where i was",
+            "head back", "walk back", "turn back", "turn around", "go back the way i came in");
+    private static final Set<String> CONTINUE_PHRASES = canonicalSet("continue", "keep going", "go on",
+            "forward", "go forward", "keep walking", "carry on", "walk on", "keep moving", "move on",
+            "onward", "go straight", "straight ahead", "go straight ahead", "go further", "go farther",
+            "continue on", "keep on", "keep on going", "go ahead", "move forward", "walk forward",
+            "further", "farther", "go on further", "keep heading", "keep heading that way",
+            "keep going that way", "continue that way", "same way", "same direction",
+            "keep going the same way", "go the same way");
+    private static final Set<String> EXIT_QUESTIONS = canonicalSet("which way can i go", "what are the exits",
+            "which exits are there", "what exits are there", "where can i go", "where can i go from here",
+            "exits", "list the exits", "show the exits", "what directions can i go", "which directions",
+            "which directions can i go", "which way", "which way now", "where to", "where does it go",
+            "are there any exits", "what exits", "what are the ways out", "how do i get out",
+            "how do i leave", "where are the exits", "what way can i go", "what are my options");
+    private static final Set<String> CHATTER_STARTERS = set("i", "it", "that", "this", "because", "since",
+            "cause", "which", "maybe", "hopefully", "probably", "you");
+    private static final Set<String> NO_STATE_COMMANDS = set("look", "l", "i", "inventory", "score",
+            "diagnose", "time", "verbose", "brief", "superbrief", "help", "hint");
+    private static final Set<String> NOT_MOVES = set("restore", "restart", "load", "undo", "look", "l");
+    private static final Set<String> LANDMARK_VERBS = set("go", "walk", "run", "head", "cross", "climb",
+            "enter", "follow", "take", "wade", "swim", "jump", "crawl", "step", "move", "use", "travel",
+            "ford", "approach", "proceed", "descend", "ascend", "squeeze");
+    private static final Pattern LEAVE = Pattern.compile(
+            "^(?:leave|exit|get out of|go out of|walk out of|step out of|head out of) (?:the )?(.+)$");
+    private static final Set<String> QUESTION_WORDS = set("what", "where", "who", "why", "how",
+            "when", "which", "is", "are", "can", "could", "do", "does", "should");
+    private static final Set<String> PRONOUNS = set("it", "them", "him", "her");
+    private static final Set<String> NOUN_STOPS = set("here", "there", "is", "are", "was", "and",
+            "with", "in", "on", "of", "to", "from", "at", "by", "into", "it", "that", "which",
+            "you", "a", "an", "the", "all", "but", "as", "for", "lies", "sits", "stands");
+    private static final Set<String> VERB_STARTERS = set("take", "get", "grab", "pick", "drop",
+            "open", "close", "shut", "go", "walk", "run", "head", "climb", "enter", "exit", "leave",
+            "read", "examine", "x", "look", "check", "inspect", "put", "place", "turn", "switch", "light",
+            "move", "push", "pull", "press", "kill", "attack", "hit", "fight", "give", "throw", "eat",
+            "drink", "wait", "z", "inventory", "i", "unlock", "lock", "search", "wear", "remove",
+            "tie", "untie", "dig", "fill", "pour", "wave", "ring", "inflate", "deflate", "listen",
+            "smell", "touch", "say", "answer", "jump", "swim", "follow", "board", "launch", "lower",
+            "raise", "lift", "break", "cut", "burn", "blow", "count", "pray", "knock", "save", "score",
+            "restore", "north", "south", "east", "west", "northeast", "northwest", "southeast",
+            "southwest", "up", "down", "n", "s", "e", "w", "ne", "nw", "se", "sw", "u", "d",
+            "then", "also", "use", "return", "continue", "undo", "help", "cross", "peek", "peer", "stick",
+            "slide", "insert", "explore", "try", "describe", "keep", "let", "unlock", "knock");
+    private static final Map<String, String> OPPOSITE = new HashMap<>();
+    private static final Map<String, String> DIRECTION_ABBREVIATION = new HashMap<>();
+    private static final List<String> CANT_GO_PHRASES = Arrays.asList(
+            "you can't go that way", "you must specify", "you hit your head", "i don't know the word",
+            "there was no verb", "that sentence isn't one i recogni", "you can't see any such thing",
+            "i only understood you as far as", "you used the word", "where do you want to go",
+            "you'll have to say which", "you can't go there", "you can't see any");
+    private static final Pattern GO_TO = Pattern.compile(
+            "^(?:go|walk|head|run|travel|return|get|navigate|move|find the way|take me)"
+                    + "(?: back)? (?:to|into|toward|towards) (?:the )?(.+)$");
+    private static final Pattern USE_ON = Pattern.compile("^use (?:the )?(.+?) (?:on|with|in|to open) (?:the )?(.+)$");
+    private static final Pattern REPEAT = Pattern.compile("^(.+?) (twice|two times|three times|four times|five times|(\\d) times)$");
+    private static final Pattern CLAUSE_SPLIT = Pattern.compile(
+            "\\s*(?:[.;!?]+\\s+|,?\\s+and then\\s+|,\\s*then\\s+|\\s+then\\s+|,\\s*after that\\s+|\\s+after that\\s+)\\s*");
+    private static final Pattern AND_SPLIT = Pattern.compile("\\s*(?:,\\s*and\\s+|\\s+and\\s+|,\\s*)");
+
+    static {
+        String[][] pairs = {{"N", "S"}, {"E", "W"}, {"NE", "SW"}, {"NW", "SE"}, {"U", "D"}, {"IN", "OUT"}};
+        for (String[] pair : pairs) {
+            OPPOSITE.put(pair[0], pair[1]);
+            OPPOSITE.put(pair[1], pair[0]);
+        }
+        for (Map.Entry<String, String> entry : CommandNormalizer.DIRECTIONS.entrySet()) {
+            DIRECTION_ABBREVIATION.put(entry.getKey().replace(" ", ""), entry.getValue());
+            DIRECTION_ABBREVIATION.put(entry.getValue().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+        DIRECTION_ABBREVIATION.put("in", "IN");
+        DIRECTION_ABBREVIATION.put("out", "OUT");
+    }
+
+    private static final class Move {
+        final String direction;
+        final String from;
+        final String to;
+
+        Move(String direction, String from, String to) {
+            this.direction = direction;
+            this.from = from;
+            this.to = to;
+        }
+    }
+
+    private static final class Snapshot {
+        final Object state;
+        final String room;
+        final Move lastMove;
+        final String lastNoun;
+        final String input;
+
+        Snapshot(Object state, String room, Move lastMove, String lastNoun, String input) {
+            this.state = state;
+            this.room = room;
+            this.lastMove = lastMove;
+            this.lastNoun = lastNoun;
+            this.input = input;
+        }
+    }
+
+    private final Game game;
+    private List<String> pending;
+    private final Deque<Snapshot> undo = new ArrayDeque<>();
+    private final Map<String, Map<String, String>> map = new LinkedHashMap<>();
+    private final Set<String> vocabulary = new LinkedHashSet<>();
+    private String room;
+    private Move lastMove;
+    private String lastNoun;
+    private String roomDescription;
+    // The fullest description seen for each room, for "go to the stairs" seen in an earlier room.
+    private final Map<String, String> roomTexts = new HashMap<>();
+    private final Deque<String> recentResponses = new ArrayDeque<>();
+
+    public CommandSession(Game game) {
+        this.game = game;
+    }
+
+    /** Call with the game's opening text so the starting room is known. */
+    public void start(String introText) {
+        learnVocabulary(introText);
+        roomDescription = introText;
+        String status = game.currentRoom();
+        room = status != null ? status : roomFromResponse(introText, true);
+        if (room != null) {
+            map.computeIfAbsent(room, k -> new LinkedHashMap<>());
+            rememberRoomText(room, introText);
+        }
+    }
+
+    private void rememberRoomText(String name, String text) {
+        if (text == null) {
+            return;
+        }
+        String old = roomTexts.get(name);
+        if (old == null || text.length() > old.length()) {
+            roomTexts.put(name, text);
+        }
+    }
+
+    /** True while numbered suggestions are waiting for a choice. */
+    public boolean hasPendingSuggestions() {
+        return pending != null;
+    }
+
+    public Result handle(String input) {
+        Result result = new Result();
+        String text = input == null ? "" : input.trim();
+        List<String> offered = pending;
+        pending = null;
+
+        if (offered != null) {
+            int choice = CommandSuggester.parseChoice(text);
+            if (choice >= 1 && choice <= offered.size()) {
+                takeSnapshot(offered.get(choice - 1));
+                runCommand(offered.get(choice - 1), result);
+                return result;
+            }
+            if (choice == offered.size() + 1 || CommandNormalizer.canonicalize(text).equals("something else")) {
+                result.note(ASK_AGAIN);
+                return result;
+            }
+        }
+        if (text.isEmpty()) {
+            send(" ", result);
+            return result;
+        }
+
+        String canonical = CommandNormalizer.canonicalize(text);
+        if (HELP_PHRASES.contains(canonical) && !game.contains("help")) {
+            result.note(HELP_TEXT);
+            return result;
+        }
+        if (HINT_PHRASES.contains(canonical) && !game.contains("hint")) {
+            result.note(HINT_TEXT);
+            return result;
+        }
+        if (UNDO_PHRASES.contains(canonical) && !game.contains("undo")) {
+            undo(result);
+            return result;
+        }
+
+        if (EXIT_QUESTIONS.contains(canonical)) {
+            describeExits(result);
+            return result;
+        }
+
+        boolean snapshot = takeSnapshot(text);
+        List<String> clauses = splitClauses(text);
+        for (int i = 0; i < clauses.size(); i++) {
+            if (i > 0 && isChatter(clauses.get(i))) {
+                continue;
+            }
+            if (!runClause(clauses.get(i), result)) {
+                break;
+            }
+        }
+        // Looking around doesn't change anything, so it shouldn't use up an undo step.
+        boolean changed = result.sentCommands().isEmpty();
+        for (String command : result.sentCommands()) {
+            changed |= !NO_STATE_COMMANDS.contains(command.toLowerCase(Locale.ROOT).trim());
+        }
+        if (!changed && snapshot) {
+            undo.pop();
+        }
+        return result;
+    }
+
+    // "drop the newspaper, I don't need it": a remark after a command, not a command.
+    private boolean isChatter(String clause) {
+        String[] words = CommandNormalizer.canonicalize(clause).split(" ");
+        return words.length >= 2 && CHATTER_STARTERS.contains(words[0]) && !VERB_STARTERS.contains(words[1]);
+    }
+
+    // Looks around and lists the exits the app has seen used from this room.
+    private void describeExits(Result result) {
+        runCommand("look", result);
+        Map<String, String> exits = room == null ? null : map.get(room);
+        if (exits == null || exits.isEmpty()) {
+            result.note("The game describes the exits in the room description. Try a direction, like north or go up.");
+            return;
+        }
+        List<String> known = new ArrayList<>();
+        for (Map.Entry<String, String> exit : exits.entrySet()) {
+            known.add(spokenDirection(exit.getKey()) + " to " + exit.getValue());
+        }
+        result.note("Ways you have used from here: " + String.join(", ", known) + ".");
+    }
+
+    private static String spokenDirection(String key) {
+        for (Map.Entry<String, String> entry : CommandNormalizer.DIRECTIONS.entrySet()) {
+            if (entry.getValue().equals(key) && !entry.getKey().contains(" ")) {
+                return entry.getKey();
+            }
+        }
+        switch (key) {
+            case "IN": return "in";
+            case "OUT": return "out";
+            default: return key.toLowerCase(Locale.ROOT);
+        }
+    }
+
+    // Returns false if the clause was rejected and the rest of the input should be skipped.
+    private boolean runClause(String clause, Result result) {
+        String canonical = CommandNormalizer.canonicalize(clause);
+        if (canonical.isEmpty()) {
+            return true;
+        }
+        int times = 1;
+        Matcher repeat = REPEAT.matcher(canonical);
+        if (repeat.matches()) {
+            times = repeatCount(repeat.group(2));
+            canonical = repeat.group(1);
+            clause = canonical;
+        }
+
+        if (BACK_PHRASES.contains(canonical)) {
+            if (lastMove == null) {
+                result.note("I don't know which way you came from yet.");
+                return false;
+            }
+            String direction = backDirection();
+            if (direction == null) {
+                result.note("I don't know the way back to " + lastMove.from + " from here. Try look to see the exits.");
+                return false;
+            }
+            return runCommand(direction, result);
+        }
+        if (CONTINUE_PHRASES.contains(canonical) && lastMove != null && OPPOSITE.containsKey(lastMove.direction)) {
+            boolean ok = true;
+            for (int i = 0; i < times && ok; i++) {
+                ok = runCommand(lastMove.direction, result);
+            }
+            return ok;
+        }
+        Matcher goTo = GO_TO.matcher(canonical);
+        if (goTo.matches() && CommandNormalizer.direction(goTo.group(1)) == null) {
+            return goTo(clause, goTo.group(1), result);
+        }
+        Matcher leave = LEAVE.matcher(canonical);
+        if (leave.matches() && isCurrentPlace(leave.group(1))) {
+            return runCommand(exitCommand(), result);
+        }
+
+        String command = CommandNormalizer.normalize(clause, game);
+        int mark = result.exchanges.size();
+        boolean ok = true;
+        for (int i = 0; i < times && ok; i++) {
+            ok = runCommand(command, result);
+        }
+        if (!ok && times == 1 && tryLandmark(canonical, result, mark)) {
+            return true;
+        }
+        return ok;
+    }
+
+    private String exitCommand() {
+        return game.contains("exit") ? "exit" : "out";
+    }
+
+    // "leave the gazebo" when in the Gazebo, or "leave the room".
+    private boolean isCurrentPlace(String place) {
+        Set<String> generic = set("room", "place", "area", "building", "house", "here", "this place");
+        if (generic.contains(place)) {
+            return true;
+        }
+        if (room == null) {
+            return false;
+        }
+        List<String> roomWords = Arrays.asList(room.toLowerCase(Locale.ROOT).split("[^a-z]+"));
+        for (String word : place.split(" ")) {
+            if (!word.equals("the") && !roomWords.contains(word)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // "cross the ford" or "climb onto the ledge" when the room description says
+    // "a ford to the south" or "a ledge above you": send that direction instead.
+    private boolean tryLandmark(String canonical, Result result, int mark) {
+        String[] words = canonical.split(" ");
+        if (words.length < 2 || !LANDMARK_VERBS.contains(words[0]) || roomDescription == null) {
+            return false;
+        }
+        // In brief mode a revisited room shows only its name, so fetch the full description.
+        if (roomDescription.trim().split("\\s+").length < 8) {
+            int before = result.exchanges.size();
+            send("look", result);
+            while (result.exchanges.size() > before) {
+                result.exchanges.remove(result.exchanges.size() - 1);
+            }
+        }
+        Set<String> nouns = new LinkedHashSet<>();
+        for (int i = 1; i < words.length; i++) {
+            if (words[i].length() >= 3 && !NOUN_STOPS.contains(words[i]) && !set("onto", "into", "through",
+                    "across", "over", "toward", "towards", "up", "down", "the", "inside", "along").contains(words[i])) {
+                nouns.add(words[i]);
+            }
+        }
+        String direction = null;
+        for (String sentence : roomDescription.toLowerCase(Locale.ROOT).split("[.!?;]|\\r?\\n")) {
+            List<String> sentenceWords = Arrays.asList(sentence.split("[^a-z]+"));
+            boolean mentions = false;
+            for (String noun : nouns) {
+                // "stairway" also matches "stairs".
+                String stem = noun.length() > 5 ? noun.substring(0, 5) : noun;
+                for (String word : sentenceWords) {
+                    mentions |= word.equals(noun) || (stem.length() == 5 && word.startsWith(stem));
+                }
+            }
+            if (!mentions) {
+                continue;
+            }
+            String found = directionIn(sentenceWords);
+            if (found != null) {
+                if (direction != null && !direction.equals(found)) {
+                    return false; // ambiguous
+                }
+                direction = found;
+            }
+        }
+        if (direction == null && words[0].equals("climb") && (words[1].equals("up") || words[1].equals("onto")
+                || words[1].equals("on") || words[1].equals("to"))) {
+            direction = "U";
+        }
+        if (direction == null || !game.contains(direction.toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+        String before = room;
+        String response = send(direction, result);
+        if (cantGo(response) || isRejected(response) || (before != null && before.equals(room))) {
+            result.exchanges.remove(result.exchanges.size() - 1);
+            return false;
+        }
+        // Replace the parser error and any suggestions with the move.
+        Exchange move = result.exchanges.remove(result.exchanges.size() - 1);
+        while (result.exchanges.size() > mark) {
+            result.exchanges.remove(result.exchanges.size() - 1);
+        }
+        result.exchanges.add(move);
+        pending = null;
+        result.suggestions = Collections.emptyList();
+        result.rejected = false;
+        result.note("(I took that to mean go " + spokenDirection(direction) + ".)");
+        return true;
+    }
+
+    private static String directionIn(List<String> words) {
+        String found = null;
+        for (int i = 0; i < words.size(); i++) {
+            String word = words.get(i);
+            String direction = null;
+            if (i + 1 < words.size()) {
+                direction = CommandNormalizer.DIRECTIONS.get(word + " " + words.get(i + 1));
+            }
+            if (direction == null && !word.equals("up") && !word.equals("down")) {
+                direction = CommandNormalizer.DIRECTIONS.get(word);
+            }
+            if (direction == null && (word.equals("above") || word.equals("overhead") || word.equals("upward")
+                    || word.equals("upwards"))) {
+                direction = "U";
+            }
+            if (direction == null && (word.equals("below") || word.equals("downward") || word.equals("beneath"))) {
+                direction = "D";
+            }
+            if (direction != null) {
+                if (found != null && !found.equals(direction)) {
+                    return null;
+                }
+                found = direction;
+            }
+        }
+        return found;
+    }
+
+    // Sends one command and handles a rejection. Returns false if rejected.
+    private boolean runCommand(String command, Result result) {
+        String response = send(command, result);
+        if (retryWithNoun(command, response, result)) {
+            return true;
+        }
+        if (!isRejected(response)) {
+            return true;
+        }
+        result.rejected = true;
+        explainRejection(command, response, result);
+        return false;
+    }
+
+    private String send(String command, Result result) {
+        String before = room;
+        String response = game.send(command);
+        result.exchanges.add(new Exchange(command, response, null));
+        learnVocabulary(response);
+        String lowerCommand = command.toLowerCase(Locale.ROOT).trim();
+        String direction = moveKey(lowerCommand);
+        String status = game.currentRoom();
+        String after = status != null ? status : roomFromResponse(response, direction != null);
+        boolean isMove = !NOT_MOVES.contains(lowerCommand) && !isRejected(response);
+        if (after != null) {
+            map.computeIfAbsent(after, k -> new LinkedHashMap<>());
+            if (isMove && before != null && !after.equals(before) && (direction != null || isTravel(lowerCommand))) {
+                // Any command that changes the room is a way between them ("go inside", "climb the stairs").
+                String key = direction != null ? direction : lowerCommand;
+                map.computeIfAbsent(before, k -> new LinkedHashMap<>()).put(key, after);
+                // Assume the way back is the opposite direction until a move proves otherwise.
+                String opposite = OPPOSITE.get(key);
+                if (opposite != null) {
+                    map.get(after).putIfAbsent(opposite, before);
+                }
+                lastMove = new Move(key, before, after);
+            }
+            if ((!after.equals(before) || lowerCommand.equals("look") || lowerCommand.equals("l")) && !isRejected(response)) {
+                roomDescription = response;
+                rememberRoomText(after, response);
+            }
+            room = after;
+        }
+        if (direction != null && before != null && before.equals(room) && map.containsKey(before)) {
+            map.get(before).remove(direction);
+        }
+        recentResponses.addLast(response == null ? "" : response);
+        while (recentResponses.size() > 6) {
+            recentResponses.removeFirst();
+        }
+        if (!isRejected(response)) {
+            rememberNoun(command, response);
+        }
+        return response;
+    }
+
+    // Commands worth replaying to walk a route: "climb the stairs", not "pray" or "attack troll".
+    private static boolean isTravel(String command) {
+        String first = command.split(" ")[0];
+        return OPPOSITE.containsKey(command.toUpperCase(Locale.ROOT)) || LANDMARK_VERBS.contains(first)
+                || set("exit", "leave", "board", "disembark", "slide", "descend", "ascend").contains(first);
+    }
+
+    // "N", "north", "go north", "go inside", "enter" -> the map key for a plain direction, else null.
+    private static String moveKey(String command) {
+        String text = command.replaceFirst("^(?:go|walk|run|head) ", "");
+        String direction = DIRECTION_ABBREVIATION.get(text.replace(" ", ""));
+        if (direction != null) {
+            return direction;
+        }
+        switch (text) {
+            case "inside": case "enter": return "IN";
+            case "outside": case "exit": case "leave": return "OUT";
+            default: return null;
+        }
+    }
+
+    private boolean retryWithNoun(String command, String response, Result result) {
+        String lower = response.toLowerCase(Locale.ROOT).replace('\u2019', '\'');
+        boolean unclear = lower.contains("i don't see what you are referring to")
+                || lower.contains("i'm not sure what") || lower.contains("what do you want to")
+                || lower.contains("you can't see any such thing");
+        if (!unclear || lastNoun == null) {
+            return false;
+        }
+        String[] words = command.toLowerCase(Locale.ROOT).split(" ");
+        boolean replaced = false;
+        for (int i = 0; i < words.length; i++) {
+            if (PRONOUNS.contains(words[i])) {
+                words[i] = "the " + lastNoun;
+                replaced = true;
+            }
+        }
+        if (!replaced) {
+            return false;
+        }
+        String retried = String.join(" ", words);
+        String retryResponse = send(retried, result);
+        if (isRejected(retryResponse) || retryResponse.toLowerCase(Locale.ROOT).contains("you can't see any")) {
+            result.exchanges.remove(result.exchanges.size() - 1);
+            return false;
+        }
+        // Hide the parser error; it didn't use a turn.
+        result.exchanges.remove(result.exchanges.size() - 2);
+        result.note("(I took it to mean the " + lastNoun + ".)");
+        return true;
+    }
+
+    private void explainRejection(String command, String response, Result result) {
+        String canonical = CommandNormalizer.canonicalize(command);
+        String firstWord = canonical.split(" ")[0];
+        if (QUESTION_WORDS.contains(firstWord)) {
+            result.note(QUESTION_NOTE);
+            return;
+        }
+        String lowerResponse = response.toLowerCase(Locale.ROOT).replace('\u2019', '\'');
+        if (lowerResponse.contains("what do you want to") || lowerResponse.contains("noun missing")) {
+            result.note("Say the whole command, including what to use, like " + exampleFor(canonical) + ".");
+            return;
+        }
+        Matcher use = USE_ON.matcher(canonical);
+        if (firstWord.equals("use") && !game.contains("use")) {
+            if (use.matches()) {
+                offer(useOptions(use.group(1), use.group(2)), result);
+            } else {
+                result.note("This game doesn't know use. Say what to do instead, like turn, "
+                        + "open, light, wave or read.");
+            }
+            return;
+        }
+        List<String> suggestions = CommandSuggester.suggest(command, game.dictionaryWords(), 3,
+                response, recentVocabulary());
+        if (suggestions.isEmpty()) {
+            if (!CommandSuggester.isRejection(response) || response.toLowerCase(Locale.ROOT).contains("can't see")) {
+                return;
+            }
+            result.note(REPHRASE_NOTE);
+            return;
+        }
+        offer(suggestions, result);
+    }
+
+    // "use the key on the door": unlock first for keys, put in first for holes and slots.
+    private List<String> useOptions(String tool, String target) {
+        String[] verbs;
+        String both = tool + " " + target;
+        if (both.matches(".*\\b(key|keys)\\b.*")) {
+            verbs = new String[]{"unlock", "open", "put"};
+        } else if (target.matches(".*\\b(keyhole|hole|slot|lock|socket|crack|opening|receptacle)\\b.*")) {
+            verbs = new String[]{"put", "unlock", "open"};
+        } else if (tool.matches(".*\\b(lamp|lantern|torch|match|matches|candle|candles)\\b.*")) {
+            verbs = new String[]{"light", "burn", "turn"};
+        } else {
+            verbs = new String[]{"open", "turn", "hit", "put", "unlock"};
+        }
+        List<String> options = new ArrayList<>();
+        for (String verb : verbs) {
+            if (!game.contains(verb)) {
+                continue;
+            }
+            options.add(verb.equals("put")
+                    ? "put the " + tool + " in the " + target
+                    : verb + " the " + target + " with the " + tool);
+            if (options.size() == 3) {
+                break;
+            }
+        }
+        return options;
+    }
+
+    private static String exampleFor(String canonical) {
+        String verb = canonical.split(" ")[0];
+        switch (verb) {
+            case "go": case "walk": return "go through the door";
+            case "look": return "look in the box";
+            case "put": return "put the coin in the slot";
+            case "unlock": case "open": return verb + " the door with the key";
+            default:
+                if (verb.isEmpty()) {
+                    return "open the door";
+                }
+                // "turn the bolt" -> "turn the bolt with the item you want to use"
+                return canonical.contains(" ") ? canonical + " with the item you want to use" : verb + " the lamp";
+        }
+    }
+
+    private void offer(List<String> options, Result result) {
+        if (options.isEmpty()) {
+            result.note(REPHRASE_NOTE);
+            return;
+        }
+        pending = options;
+        result.suggestions = options;
+        result.note(CommandSuggester.buildPrompt(options));
+    }
+
+    private boolean goTo(String clause, String place, Result result) {
+        // Let the game try first ("go into the house" may be a real command); parser
+        // errors don't use a turn, so on failure the reply is replaced by the walk.
+        String command = CommandNormalizer.normalize(clause, game);
+        String before = room;
+        String response = send(command, result);
+        String target = findRoom(place);
+        boolean stayed = before != null && before.equals(room);
+        if (!cantGo(response) && !(stayed && target != null && !target.equals(room))) {
+            return true;
+        }
+        // Either the game didn't understand, or it answered without moving ("It's here!")
+        // although the app knows the place is elsewhere.
+        Exchange attempt = result.exchanges.remove(result.exchanges.size() - 1);
+        if (target == null) {
+            int mark = result.exchanges.size();
+            result.exchanges.add(attempt);
+            if (tryLandmark(CommandNormalizer.canonicalize(clause), result, mark)) {
+                return true;
+            }
+            target = roomMentioning(place);
+            if (target != null) {
+                while (result.exchanges.size() > mark) {
+                    result.exchanges.remove(result.exchanges.size() - 1);
+                }
+                return walkTo(target, result);
+            }
+            result.rejected = true;
+            result.note("I don't know a place called " + place + " yet. Try a direction, like north or go up.");
+            return false;
+        }
+        return walkTo(target, result);
+    }
+
+    private boolean walkTo(String target, Result result) {
+        if (target.equals(room)) {
+            result.note("You are already in " + target + ".");
+            return true;
+        }
+        List<String> path = route(room, target);
+        if (path == null) {
+            result.note("I don't know a way to " + target + " from here yet.");
+            return false;
+        }
+        String expected = room;
+        for (String direction : path) {
+            expected = map.get(expected).get(direction);
+            if (!runCommand(direction, result)) {
+                return false;
+            }
+            if (room == null || !room.equals(expected)) {
+                result.note("I expected to reach " + expected + ", so I stopped here.");
+                return false;
+            }
+        }
+        result.note("You walk to " + target + ".");
+        return true;
+    }
+
+    // The nearest other room whose description mentions the place ("stairway" matches "stairs").
+    private String roomMentioning(String place) {
+        Set<String> nouns = new LinkedHashSet<>();
+        for (String word : place.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+            if (word.length() >= 4 && !NOUN_STOPS.contains(word) && !DIRECTION_ABBREVIATION.containsKey(word)
+                    && !set("room", "area", "place", "back", "side", "other", "that", "this").contains(word)) {
+                nouns.add(word);
+            }
+        }
+        if (nouns.isEmpty() || room == null) {
+            return null;
+        }
+        String best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (Map.Entry<String, String> entry : roomTexts.entrySet()) {
+            String name = entry.getKey();
+            if (name.equals(room)) {
+                continue;
+            }
+            List<String> textWords = Arrays.asList(entry.getValue().toLowerCase(Locale.ROOT).split("[^a-z]+"));
+            boolean mentions = true;
+            for (String noun : nouns) {
+                String stem = noun.length() > 5 ? noun.substring(0, 5) : noun;
+                boolean found = false;
+                for (String word : textWords) {
+                    found |= word.equals(noun) || (stem.length() == 5 && word.startsWith(stem));
+                }
+                mentions &= found;
+            }
+            List<String> path = mentions ? route(room, name) : null;
+            if (path != null && path.size() < bestDistance) {
+                best = name;
+                bestDistance = path.size();
+            }
+        }
+        return best;
+    }
+
+    private String findRoom(String place) {
+        String wanted = place.toLowerCase(Locale.ROOT).replaceAll("^(the|a|an) ", "");
+        List<String> words = new ArrayList<>();
+        for (String word : wanted.split(" ")) {
+            if (word.equals("back")) {
+                word = "behind";
+            }
+            if (!set("the", "a", "an", "room", "area", "place", "of").contains(word)) {
+                words.add(word);
+            }
+        }
+        String best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (String name : map.keySet()) {
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.equals(wanted)) {
+                return name;
+            }
+            Set<String> nameWords = new HashSet<>(Arrays.asList(lower.split(" ")));
+            if (words.isEmpty() || !nameWords.containsAll(words)) {
+                continue;
+            }
+            List<String> path = room == null ? null : route(room, name);
+            int distance = name.equals(room) ? 0 : path == null ? 1000 + name.length() : path.size();
+            if (distance < bestDistance) {
+                best = name;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    private List<String> route(String from, String to) {
+        if (from == null) {
+            return null;
+        }
+        Map<String, List<String>> paths = new HashMap<>();
+        Deque<String> queue = new ArrayDeque<>();
+        paths.put(from, new ArrayList<>());
+        queue.add(from);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            if (current.equals(to)) {
+                return paths.get(current);
+            }
+            Map<String, String> exits = map.get(current);
+            if (exits == null || paths.get(current).size() >= MAX_WALK) {
+                continue;
+            }
+            for (Map.Entry<String, String> exit : exits.entrySet()) {
+                if (!paths.containsKey(exit.getValue())) {
+                    List<String> path = new ArrayList<>(paths.get(current));
+                    path.add(exit.getKey());
+                    paths.put(exit.getValue(), path);
+                    queue.add(exit.getValue());
+                }
+            }
+        }
+        return null;
+    }
+
+    private String backDirection() {
+        if (lastMove == null) {
+            return null;
+        }
+        Map<String, String> exits = room == null ? null : map.get(room);
+        if (exits != null) {
+            for (Map.Entry<String, String> exit : exits.entrySet()) {
+                if (exit.getValue().equals(lastMove.from)) {
+                    return exit.getKey();
+                }
+            }
+        }
+        return OPPOSITE.get(lastMove.direction);
+    }
+
+    private boolean takeSnapshot(String input) {
+        Object state = game.snapshot();
+        if (state == null) {
+            return false;
+        }
+        undo.push(new Snapshot(state, room, lastMove, lastNoun, input));
+        while (undo.size() > MAX_UNDO) {
+            undo.removeLast();
+        }
+        return true;
+    }
+
+    private void undo(Result result) {
+        Snapshot snapshot = undo.poll();
+        if (snapshot == null || !game.restore(snapshot.state)) {
+            result.note("There is nothing to undo.");
+            return;
+        }
+        String status = game.currentRoom();
+        room = status != null ? status : snapshot.room;
+        lastMove = snapshot.lastMove;
+        lastNoun = snapshot.lastNoun;
+        String what = snapshot.input == null || snapshot.input.trim().isEmpty() ? "Undone" : "Took back: " + snapshot.input.trim();
+        result.note(room == null ? what + "." : what + ". You are in " + room + ".");
+    }
+
+    private void rememberNoun(String command, String response) {
+        String[] words = command.toLowerCase(Locale.ROOT).split(" ");
+        boolean handledObject = false;
+        for (int i = words.length - 1; i >= 1; i--) {
+            String word = words[i];
+            if (!NOUN_STOPS.contains(word) && !PRONOUNS.contains(word)
+                    && !DIRECTION_ABBREVIATION.containsKey(word) && game.contains(word)) {
+                lastNoun = word;
+                handledObject = true;
+                break;
+            }
+        }
+        // Only object interactions ("open the mailbox" -> "reveals a leaflet") introduce a new noun;
+        // room descriptions from look or movement mention too much scenery.
+        String noun = handledObject ? lastNounIn(response) : null;
+        if (noun != null) {
+            lastNoun = noun;
+        }
+    }
+
+    // The last "a/an/the <known words>" phrase in the response; the last word is the noun.
+    private String lastNounIn(String response) {
+        if (response == null) {
+            return null;
+        }
+        String[] words = response.toLowerCase(Locale.ROOT).replaceAll("[^a-z\\s]", " ").trim().split("\\s+");
+        String noun = null;
+        for (int i = 0; i < words.length; i++) {
+            if (!words[i].equals("a") && !words[i].equals("an") && !words[i].equals("the")) {
+                continue;
+            }
+            String candidate = null;
+            for (int j = i + 1; j < words.length && j <= i + 4; j++) {
+                if (NOUN_STOPS.contains(words[j]) || !game.contains(words[j])) {
+                    break;
+                }
+                candidate = words[j];
+            }
+            if (candidate != null) {
+                noun = candidate;
+            }
+        }
+        return noun;
+    }
+
+    private void learnVocabulary(String response) {
+        if (response == null) {
+            return;
+        }
+        for (String word : response.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+            if (word.length() >= 3) {
+                vocabulary.add(word);
+            }
+        }
+    }
+
+    // Words from the last few replies and the room description: things the player can refer to now.
+    private Set<String> recentVocabulary() {
+        Set<String> words = new LinkedHashSet<>();
+        List<String> texts = new ArrayList<>(recentResponses);
+        texts.add(roomDescription);
+        for (String text : texts) {
+            if (text == null) {
+                continue;
+            }
+            for (String word : text.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+                if (word.length() >= 3) {
+                    words.add(word);
+                }
+            }
+        }
+        return words;
+    }
+
+    private boolean isRejected(String response) {
+        return CommandSuggester.isRejection(response);
+    }
+
+    private static boolean cantGo(String response) {
+        String lower = response == null ? "" : response.toLowerCase(Locale.ROOT).replace('\u2019', '\'');
+        for (String phrase : CANT_GO_PHRASES) {
+            if (lower.contains(phrase)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A room heading is a short capitalised first line without sentence punctuation, e.g. "West of House".
+    static String roomFromResponse(String response, boolean moved) {
+        if (response == null || response.trim().isEmpty()) {
+            return null;
+        }
+        String[] lines = response.trim().split("\\r?\\n");
+        for (int i = 0; i < Math.min(lines.length, moved ? 1 : 6); i++) {
+            String line = lines[i].trim();
+            if (looksLikeRoomName(line)) {
+                return line;
+            }
+        }
+        return null;
+    }
+
+    private static boolean looksLikeRoomName(String line) {
+        if (line.isEmpty() || line.matches(".*[.!?:,\"]$") || line.contains(">")) {
+            return false;
+        }
+        String[] words = line.split("\\s+");
+        if (words.length > 6) {
+            return false;
+        }
+        Set<String> small = set("of", "the", "and", "a", "an", "in", "on", "to", "at", "by", "with");
+        for (int i = 0; i < words.length; i++) {
+            String word = words[i];
+            if (i > 0 && small.contains(word)) {
+                continue;
+            }
+            if (!Character.isUpperCase(word.charAt(0))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Splits "open the mailbox and take the leaflet. go north" into separate commands. */
+    List<String> splitClauses(String input) {
+        List<String> clauses = new ArrayList<>();
+        for (String sentence : CLAUSE_SPLIT.split(input.trim())) {
+            String[] parts = AND_SPLIT.split(sentence);
+            StringBuilder current = new StringBuilder();
+            Matcher separators = AND_SPLIT.matcher(sentence);
+            List<String> seps = new ArrayList<>();
+            while (separators.find()) {
+                seps.add(separators.group());
+            }
+            for (int i = 0; i < parts.length; i++) {
+                String part = parts[i].trim();
+                if (part.isEmpty()) {
+                    continue;
+                }
+                String first = CommandNormalizer.canonicalize(part).split(" ")[0];
+                if (current.length() > 0 && !VERB_STARTERS.contains(first)) {
+                    current.append(seps.get(i - 1)).append(part);
+                } else {
+                    if (current.length() > 0) {
+                        clauses.add(current.toString());
+                    }
+                    current = new StringBuilder(part);
+                }
+            }
+            if (current.length() > 0) {
+                clauses.add(current.toString());
+            }
+        }
+        return clauses;
+    }
+
+    private static int repeatCount(String phrase) {
+        switch (phrase) {
+            case "twice": case "two times": return 2;
+            case "three times": return 3;
+            case "four times": return 4;
+            case "five times": return 5;
+            default:
+                return Math.max(1, Math.min(MAX_REPEAT, Integer.parseInt(phrase.substring(0, 1))));
+        }
+    }
+
+    private static Set<String> set(String... words) {
+        return new HashSet<>(Arrays.asList(words));
+    }
+
+    private static Set<String> canonicalSet(String... phrases) {
+        Set<String> result = new HashSet<>();
+        for (String phrase : phrases) {
+            result.add(phrase);
+            result.add(CommandNormalizer.canonicalize(phrase));
+        }
+        return result;
+    }
+}

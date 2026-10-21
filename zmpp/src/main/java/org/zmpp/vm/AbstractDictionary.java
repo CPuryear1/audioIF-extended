@@ -101,6 +101,12 @@ public abstract class AbstractDictionary implements Dictionary {
     return address + headerSize + entryNum * getEntryLength();
   }
 
+  /** {@inheritDoc} */
+  public String getEntryWord(final int entryNum) {
+    return getDecoder().decode2Zscii(getMemory(), getEntryAddress(entryNum),
+        sizes.getNumEntryBytes()).trim();
+  }
+
   /**
    * Access to the decoder object.
    * @return the decoder object

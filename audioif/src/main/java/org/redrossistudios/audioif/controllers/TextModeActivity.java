@@ -1,7 +1,13 @@
 package org.redrossistudios.audioif.controllers;
 
 import android.app.ProgressDialog;
+import android.graphics.Typeface;
 import android.os.Handler;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
+import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.KeyEvent;
@@ -13,17 +19,20 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.redrossistudios.audioif.R;
+import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
+import org.redrossistudios.audioif.helpers.AutoSave;
+import org.redrossistudios.audioif.helpers.CommandSession;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
+import org.redrossistudios.audioif.helpers.ZGame;
 import org.redrossistudios.audioif.models.StoryFileType;
 import org.zmpp.ExecutionControl;
 import org.zmpp.blorb.NativeImage;
 import org.zmpp.blorb.NativeImageFactory;
 import org.zmpp.io.IOSystem;
 import org.zmpp.vm.MachineFactory;
-import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
 
 import java.io.File;
@@ -32,6 +41,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
+import java.util.List;
 
 public class TextModeActivity extends AppCompatActivity {
 
@@ -51,6 +61,9 @@ public class TextModeActivity extends AppCompatActivity {
     private SavedGameManager savedGameManager;
     private String filePath;
     private TextModeActivity activity;
+    private CommandSession session;
+    private ZGame game;
+    private AutoSave autoSave;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,6 +73,7 @@ public class TextModeActivity extends AppCompatActivity {
         getSupportActionBar().hide();
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_text_mode);
+        EdgeToEdge.applySystemBarPadding(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         storyField = (TextView) findViewById(R.id.textView);
         storyField.setText("");
@@ -84,7 +98,7 @@ public class TextModeActivity extends AppCompatActivity {
             public void fileSelected(final File file) {
                 try {
                     filePath = file.getAbsolutePath();
-                    String fileExtension = file.getName().split("\\.")[1];
+                    String fileExtension = file.getName().substring(file.getName().lastIndexOf('.') + 1);
                     StoryFileType storyFileType = storyFileTypeChecker.GetStoryFileType(fileExtension);
                     storyIs = new FileInputStream(file);
                     configureEngine(storyIs, storyFileType);
@@ -105,19 +119,24 @@ public class TextModeActivity extends AppCompatActivity {
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
+            game = new ZGame(executionControl, screenModel);
+            session = new CommandSession(game);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
                     handleButtonClick();
                 }
             });
-            String initialText = getBufferText(screenModel);
-            if(initialText.length() > 1){
+            String initialText = game.readIntro();
+            autoSave = new AutoSave(new File(getFilesDir(), "autosave"), filePath);
+            if (autoSave.exists() && game.loadState(autoSave.loadState())) {
+                String recap = autoSave.loadRecap();
+                storyField.append(recap);
+                appendNote(AutoSave.RESUMED_NOTE);
+                session.start(recap);
+            } else {
                 storyField.append(initialText);
-            }
-            else{
-                commandField.setText(" ");
-                handleButtonClick();
+                session.start(initialText);
             }
 
         } catch (Exception ex) {
@@ -140,7 +159,7 @@ public class TextModeActivity extends AppCompatActivity {
                 return null;
             }
         };
-        savedGameManager = new SavedGameManager(filePath.split("\\.")[0] + ".sav");
+        savedGameManager = new SavedGameManager(filePath.substring(0, filePath.lastIndexOf('.')) + ".sav");
         machineInit.saveGameDataStore = savedGameManager;
 
         machineInit.ioSystem = new IOSystem() {
@@ -157,40 +176,55 @@ public class TextModeActivity extends AppCompatActivity {
     }
 
     private void handleButtonClick(){
-        String currentCommand = commandField.getText().toString();
-        String currentText = "";
-
-        executionControl.resumeWithInput(currentCommand);
-        currentText = getBufferText(screenModel);
-
-        if(currentText.length() > 1){
-            storyField.append("\n\n >" + commandField.getText() + "\n\n" + currentText);
-            footer.requestFocus();
-            commandField.setText("");
-
-//            boolean isLandscape = this.getResources().getBoolean(R.bool.is_landscape);
-//            if(!isLandscape){
-//                commandField.requestFocus();
-//                InputMethodManager inputMethodManager = (InputMethodManager) this.getSystemService(this.INPUT_METHOD_SERVICE);
-//                inputMethodManager.toggleSoftInputFromWindow(this.getCurrentFocus().getWindowToken(), InputMethodManager.SHOW_FORCED, 0);
-//            }
+        if (session == null) {
+            return;
         }
-        else{
-            commandField.setText(" ");
-            handleButtonClick();
+        String typed = commandField.getText().toString();
+        CommandSession.Result result = session.handle(typed);
+        // Show what was actually sent when the app changed or split the command.
+        List<String> sent = result.sentCommands();
+        boolean unchanged = sent.size() == 1 && sent.get(0).trim().equalsIgnoreCase(typed.trim());
+        appendCommandEcho(unchanged || sent.isEmpty() ? typed : typed + "  [" + String.join("; ", sent) + "]");
+        for (CommandSession.Exchange exchange : result.exchanges) {
+            if (exchange.response != null && !exchange.response.trim().isEmpty()) {
+                storyField.append("\n\n" + exchange.response);
+            }
+            if (exchange.note != null) {
+                appendNote(exchange.note);
+            }
+        }
+        footer.requestFocus();
+        commandField.setText("");
+        saveProgress();
+    }
+
+    private void saveProgress() {
+        if (game != null && autoSave != null) {
+            autoSave.save(game.saveState(), storyField.getText().toString());
         }
     }
 
-    private String getBufferText(BufferedScreenModel screenModel){
-        String result = "";
-        for (AnnotatedText text : screenModel.getLowerBuffer()) {
-            result += text.getText();
-        }
-        if(result.length() > 2){
-            return result.substring(0,result.length()-2).trim();
-        }
-        return result;
+    @Override
+    protected void onPause() {
+        saveProgress();
+        super.onPause();
     }
+
+    private void appendCommandEcho(String echo) {
+        SpannableString line = new SpannableString("\n\n> " + echo);
+        line.setSpan(new ForegroundColorSpan(ContextCompat.getColor(this, R.color.amber)),
+                0, line.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        line.setSpan(new StyleSpan(Typeface.BOLD), 0, line.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        storyField.append(line);
+    }
+
+    // App messages (help, suggestions, undo) are shown in italics to set them apart from the game.
+    private void appendNote(String note) {
+        SpannableString line = new SpannableString("\n\n" + note);
+        line.setSpan(new StyleSpan(Typeface.ITALIC), 0, line.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        storyField.append(line);
+    }
+
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         switch (keyCode) {

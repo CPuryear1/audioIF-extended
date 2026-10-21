@@ -29,6 +29,7 @@
 package org.zmpp.vm;
 
 import java.io.Serializable;
+import java.util.List;
 
 import org.zmpp.base.Memory;
 import org.zmpp.base.StoryFileHeader;
@@ -111,6 +112,12 @@ extends ObjectTree, Input, Output, Cpu, Memory, IZsciiEncoding, Serializable {
    * @return dictionary delimiters
    */
   String getDictionaryDelimiters();
+
+  /**
+   * Returns all words in the story's main dictionary, decoded to strings.
+   * @return the dictionary words
+   */
+  List<String> getDictionaryWords();
 
   // **********************************************************************
   // **** Encoding functions
@@ -294,4 +301,18 @@ extends ObjectTree, Input, Output, Cpu, Memory, IZsciiEncoding, Serializable {
    * @return the portable game state
    */
   PortableGameState restore_undo();
+
+  /**
+   * Captures the complete game state while the machine is waiting for line
+   * input. Used for interpreter-level undo in games without an UNDO verb.
+   * @return the captured state
+   */
+  PortableGameState captureInputState();
+
+  /**
+   * Restores a state from {@link #captureInputState()}. Call
+   * ExecutionControl.run() afterwards so the machine waits for input again.
+   * @param state the state to restore
+   */
+  void restoreInputState(PortableGameState state);
 }

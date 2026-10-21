@@ -24,18 +24,21 @@ import android.widget.EditText;
 import android.widget.TextView;
 
 import org.redrossistudios.audioif.R;
+import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
-import org.redrossistudios.audioif.helpers.CommandNormalizer;
+import org.redrossistudios.audioif.helpers.AutoSave;
+import org.redrossistudios.audioif.helpers.CommandSession;
 import org.redrossistudios.audioif.helpers.FileScanner;
+import org.redrossistudios.audioif.helpers.VoiceSettings;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
+import org.redrossistudios.audioif.helpers.ZGame;
 import org.redrossistudios.audioif.models.StoryFileType;
 import org.zmpp.ExecutionControl;
 import org.zmpp.blorb.NativeImage;
 import org.zmpp.blorb.NativeImageFactory;
 import org.zmpp.io.IOSystem;
 import org.zmpp.vm.MachineFactory;
-import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
 
 import java.io.File;
@@ -45,6 +48,7 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity implements TextToSpeech.OnInitListener {
@@ -60,8 +64,12 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private static final int REQ_CODE_RECORD_AUDIO = 101;
     private SpeechRecognizer speechRecognizer;
     private boolean isListening = false;
+    private TextView statusView;
     private int utteranceCounter = 0;
     private volatile String pendingUtteranceId;
+    private CommandSession session;
+    private ZGame game;
+    private AutoSave autoSave;
     private TextToSpeech tts;
     private InputStream storyIs;
     private FileScanner fileScanner;
@@ -85,6 +93,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag());
         intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
         isListening = true;
+        setStatus("Listening\u2026 say a command");
         speechRecognizer.startListening(intent);
     }
 
@@ -92,6 +101,13 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         if (speechRecognizer != null && isListening) {
             isListening = false;
             speechRecognizer.cancel();
+            setStatus("Paused \u2014 tap the story to listen");
+        }
+    }
+
+    private void setStatus(String text) {
+        if (statusView != null) {
+            statusView.setText(text);
         }
     }
 
@@ -103,6 +119,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         String utteranceId = "utterance-" + (++utteranceCounter);
         pendingUtteranceId = utteranceId;
         int queueMode = startsNewResponse ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
+        setStatus("Reading\u2026 tap to skip");
         tts.speak(text, queueMode, null, utteranceId);
     }
 
@@ -117,18 +134,6 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             }
         });
     }
-
-    private final CommandNormalizer.Dictionary gameDictionary = new CommandNormalizer.Dictionary() {
-        @Override
-        public boolean contains(String word) {
-            try {
-                return executionControl.getMachine().lookupToken(0, word) != 0;
-            } catch (Exception e) {
-                Log.w("CommandNormalizer", "Dictionary lookup failed for '" + word + "'", e);
-                return false;
-            }
-        }
-    };
 
     private final RecognitionListener recognitionListener = new RecognitionListener() {
         @Override
@@ -154,6 +159,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             isListening = false;
             Log.w("SpeechRecognizer", "Recognition error: " + error);
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                setStatus("Microphone permission needed");
                 tts.speak("Microphone permission is required for voice commands.",
                         TextToSpeech.QUEUE_ADD, null, "permission-error");
                 return;
@@ -172,8 +178,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 speakThenListen("Sorry, I didn't catch that. Please try again.", false);
                 return;
             }
-            commandField.setText(CommandNormalizer.normalize(matches.get(0), gameDictionary));
-            handleButtonClick();
+            handleInput(matches.get(0));
         }
 
         @Override
@@ -209,8 +214,11 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         Alert = new Alert(this);
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        EdgeToEdge.applySystemBarPadding(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         storyField = (TextView) findViewById(R.id.textView);
+        statusView = (TextView) findViewById(R.id.statusView);
+        setStatus("Loading\u2026");
         commandField = (EditText) findViewById(R.id.editText);
         button = (Button) findViewById(R.id.button);
         progressDialog = ProgressDialog.show(MainActivity.this, "",
@@ -239,6 +247,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
+            game = new ZGame(executionControl, screenModel);
+            session = new CommandSession(game);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
@@ -271,19 +281,37 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                     return true;
                 }
             });
-            String initialText = getBufferText(screenModel);
-            if(initialText.length() > 1){
+            String initialText = game.readIntro();
+            autoSave = new AutoSave(new File(getFilesDir(), "autosave"), filePath);
+            if (autoSave.exists() && game.loadState(autoSave.loadState())) {
+                String recap = autoSave.loadRecap();
+                session.start(recap);
+                storyField.setText(recap);
+                speakThenListen(AutoSave.RESUMED_NOTE, true);
+                if (!recap.isEmpty()) {
+                    speakThenListen(recap, false);
+                }
+            } else {
+                session.start(initialText);
                 storyField.setText(initialText);
-                speakThenListen(storyField.getText().toString(), true);
-            }
-            else{
-                commandField.setText(" ");
-                handleButtonClick();
+                speakThenListen(initialText, true);
             }
 
         } catch (Exception ex) {
             Alert.show("Error", ex.toString() + "\n" + ex.getMessage());
         }
+    }
+
+    private void saveProgress() {
+        if (game != null && autoSave != null) {
+            autoSave.save(game.saveState(), storyField.getText().toString());
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        saveProgress();
+        super.onPause();
     }
 
     @Override
@@ -312,6 +340,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                     || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                 Log.e("TTS", "This Language is not supported");
             } else {
+                VoiceSettings.apply(this, tts);
                 //Call speak stuff
                 fileScanner = new FileScanner(this);
                 progressDialog.dismiss();
@@ -326,7 +355,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                     public void fileSelected(final File file) {
                         try {
                             filePath = file.getAbsolutePath();
-                            String fileExtension = file.getName().split("\\.")[1];
+                            String fileExtension = file.getName().substring(file.getName().lastIndexOf('.') + 1);
                             StoryFileType storyFileType = storyFileTypeChecker.GetStoryFileType(fileExtension);
                             storyIs = new FileInputStream(file);
                             configureEngine(storyIs, storyFileType);
@@ -360,7 +389,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             }
         };
 
-        savedGameManager = new SavedGameManager(filePath.split("\\.")[0] + ".sav");
+        savedGameManager = new SavedGameManager(filePath.substring(0, filePath.lastIndexOf('.')) + ".sav");
         machineInit.saveGameDataStore = savedGameManager;
 
         machineInit.ioSystem = new IOSystem() {
@@ -377,34 +406,46 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
     private void handleButtonClick(){
-        String currentCommand = commandField.getText().toString();
-        String currentText = "";
+        handleInput(commandField.getText().toString());
+    }
 
-        executionControl.resumeWithInput(currentCommand);
-        currentText = getBufferText(screenModel);
-
-        if(currentText.length() > 1){
-            storyField.setText(currentText);
-            commandField.setText("");
-            commandField.setVisibility(View.GONE);
-            speakThenListen(storyField.getText().toString(), true);
+    // Runs speech or typed text through the shared session, then reads the game's
+    // replies followed by any app notes (suggestions, help, undo), and listens again.
+    private void handleInput(String input) {
+        if (session == null) {
+            return;
         }
-        else{
-            commandField.setText(" ");
-            handleButtonClick();
+        CommandSession.Result result = session.handle(input);
+        commandField.setText("");
+        commandField.setVisibility(View.GONE);
+        String text = result.text();
+        storyField.setText(text);
+        saveProgress();
+
+        StringBuilder responses = new StringBuilder();
+        List<String> notes = new ArrayList<>();
+        for (CommandSession.Exchange exchange : result.exchanges) {
+            if (exchange.response != null && !exchange.response.trim().isEmpty()) {
+                responses.append(responses.length() > 0 ? "\n\n" : "").append(exchange.response.trim());
+            }
+            if (exchange.note != null) {
+                notes.add(exchange.note);
+            }
+        }
+        boolean first = true;
+        if (responses.length() > 0) {
+            speakThenListen(responses.toString(), true);
+            first = false;
+        }
+        for (String note : notes) {
+            speakThenListen(note, first);
+            first = false;
+        }
+        if (first) {
+            speakThenListen(CommandSession.ASK_AGAIN, true);
         }
     }
 
-    private String getBufferText(BufferedScreenModel screenModel){
-        String result = "";
-        for (AnnotatedText text : screenModel.getLowerBuffer()) {
-            result += text.getText();
-        }
-        if(result.length() > 2){
-            return result.substring(0,result.length()-2).trim();
-        }
-        return result;
-    }
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         switch (keyCode) {

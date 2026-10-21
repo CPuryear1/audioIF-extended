@@ -1,19 +1,26 @@
 package org.redrossistudios.audioif.helpers;
 
 import android.app.Dialog;
+import android.app.ProgressDialog;
 import android.content.DialogInterface;
+import android.graphics.Typeface;
 import android.os.Environment;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
+import org.redrossistudios.audioif.R;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 
 public class FileScanner {
 
@@ -22,10 +29,8 @@ public class FileScanner {
     private final AppCompatActivity activity;
     public ListView list;
     private Dialog dialog;
-    private File currentPath;
     private ArrayList<String> filePathList;
     private File chosenFile;
-    private boolean noFilesFound;
 
     public interface FileSelectedListener {
         void fileSelected(File file);
@@ -50,23 +55,50 @@ public class FileScanner {
 
     public FileScanner(final AppCompatActivity activity) {
         this.activity = activity;
-        filePathList = scanDir(getChosenFile(Environment.getExternalStorageDirectory().getPath()),new ArrayList<String>());
-        if(filePathList.isEmpty()){
-            noFilesFound = true;
+    }
 
-        }
-        else {
+    // Scanning shared storage can take many seconds on a phone full of files, so it runs
+    // on a background thread and the picker is shown once the scan completes.
+    public void showDialog() {
+        final ProgressDialog progress = ProgressDialog.show(activity, "",
+                "Searching for games...", true);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final ArrayList<String> found = scanDir(GameLibrary.getGamesDir(activity),
+                        new ArrayList<String>(), 0);
+                Collections.sort(found, String.CASE_INSENSITIVE_ORDER);
+                scanDir(Environment.getExternalStorageDirectory(), found, 0);
+                activity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (activity.isFinishing() || activity.isDestroyed()) {
+                            return;
+                        }
+                        progress.dismiss();
+                        filePathList = found;
+                        if (filePathList.isEmpty()) {
+                            showNoFilesDialog();
+                        } else {
+                            buildDialog();
+                            dialog.show();
+                        }
+                    }
+                });
+            }
+        }, "FileScanner").start();
+    }
+
+    private void buildDialog() {
         dialog = new Dialog(activity);
         list = new ListView(activity);
         list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override public void onItemClick(AdapterView<?> parent, View view, int which, long id) {
-                String fileChosen = filePathList.get(which);
-                chosenFile = getChosenFile(fileChosen);
-
-                    if (fileListener != null) {
-                        fileListener.fileSelected(chosenFile);
-                    }
-                    dialog.dismiss();
+                chosenFile = new File(filePathList.get(which));
+                if (fileListener != null) {
+                    fileListener.fileSelected(chosenFile);
+                }
+                dialog.dismiss();
             }
         });
         dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
@@ -77,64 +109,73 @@ public class FileScanner {
                 }
             }
         });
-        dialog.setContentView(list);
-        dialog.getWindow().setLayout(WindowManager.LayoutParams.FILL_PARENT, WindowManager.LayoutParams.FILL_PARENT);
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(activity);
+        float density = activity.getResources().getDisplayMetrics().density;
+        int pad = (int) (20 * density);
+        title.setText("Choose a story");
+        title.setTypeface(Typeface.SERIF, Typeface.BOLD);
+        title.setTextSize(22);
+        title.setTextColor(ContextCompat.getColor(activity, R.color.amber));
+        title.setPadding(pad, pad, pad, pad / 2);
+        content.addView(title);
+        content.addView(list);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(content);
+        dialog.getWindow().setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
 
-
-            ArrayList<String> fileList = new ArrayList<>();
-            String[] filePathParts;
-            String rawFileName;
-            for (String filePath : filePathList) {
-                filePathParts = filePath.split("/");
-                rawFileName = filePathParts[filePathParts.length - 1];
-                fileList.add(rawFileName);
+        ArrayList<String> fileList = new ArrayList<>();
+        for (String filePath : filePathList) {
+            String name = new File(filePath).getName();
+            int dot = name.lastIndexOf('.');
+            fileList.add(dot > 0 ? name.substring(0, dot) : name);
+        }
+        list.setAdapter(new ArrayAdapter<String>(activity,
+                android.R.layout.simple_list_item_1, fileList) {
+            @Override
+            public View getView(int pos, View view, ViewGroup parent) {
+                view = super.getView(pos, view, parent);
+                TextView row = (TextView) view;
+                row.setSingleLine(true);
+                row.setTypeface(Typeface.SERIF);
+                row.setTextSize(20);
+                row.setPadding(pad, row.getPaddingTop(), pad, row.getPaddingBottom());
+                return view;
             }
-            list.setAdapter(new ArrayAdapter(activity,
-                    android.R.layout.simple_list_item_1, fileList) {
-                @Override
-                public View getView(int pos, View view, ViewGroup parent) {
-                    view = super.getView(pos, view, parent);
-                    ((TextView) view).setSingleLine(true);
-                    return view;
-                }
-            });
-        }
+        });
     }
 
-
-    public void showDialog() {
-        if(noFilesFound){
-            AlertDialog.Builder builder = new AlertDialog.Builder(activity);
-            builder.setMessage("No story files found.")
-                    .setCancelable(false)
-                    .setPositiveButton("OK", new DialogInterface.OnClickListener() {
-                        public void onClick(DialogInterface dialog, int id) {
-                            activity.finish();
-                        }
-                    });
-            AlertDialog alert = builder.create();
-            alert.show();
-        }
-        else{
-            dialog.show();
-        }
+    private void showNoFilesDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+        builder.setMessage("No story files found.")
+                .setCancelable(false)
+                .setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int id) {
+                        activity.finish();
+                    }
+                });
+        builder.create().show();
     }
 
-    private File getChosenFile(String fileChosen) {
+    private static final int MAX_SCAN_DEPTH = 8;
 
-            return new File(currentPath, fileChosen);
-    }
-
-    private ArrayList<String> scanDir(File dir, ArrayList<String> list) {
+    private ArrayList<String> scanDir(File dir, ArrayList<String> list, int depth) {
+        if (depth > MAX_SCAN_DEPTH) {
+            return list;
+        }
         File[] children = dir.listFiles();
         if (children == null)
             return list;
-        for (int count = 0; count < children.length; count++) {
-            File child = children[count];
-            if (child.isFile() && child.getName().matches(STORY_EXTENSIONS))
-                list.add(child.getPath());
-            else
-                scanDir(child, list);
+        for (File child : children) {
+            String name = child.getName();
+            if (child.isFile()) {
+                if (name.matches(STORY_EXTENSIONS)) {
+                    list.add(child.getPath());
+                }
+            } else if (!name.startsWith(".") && !(depth == 0 && name.equals("Android"))) {
+                scanDir(child, list, depth + 1);
+            }
         }
         return list;
     }
