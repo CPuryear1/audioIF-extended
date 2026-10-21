@@ -34,7 +34,7 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
 
 ## Tests
 - Fast tests, run after most changes:
-  `.\gradlew.bat :audioif:testDebugUnitTest --console=plain -q --tests "*WalkthroughParserTest" --tests "*InfocomCatalogTest" --tests "*HintAdvisorTest" --tests "*CommandSuggesterTest" --tests "*CommandSessionTest" --tests "*CommandNormalizerTest" --tests "*AutoSaveTest" --tests "*SpeechMatcherTest"`
+  `.\gradlew.bat :audioif:testDebugUnitTest --console=plain -q --tests "*WalkthroughParserTest" --tests "*InfocomCatalogTest" --tests "*HintAdvisorTest" --tests "*CommandSuggesterTest" --tests "*CommandSessionTest" --tests "*CommandNormalizerTest" --tests "*AutoSaveTest" --tests "*SpeechMatcherTest" --tests "*PlayLogTest"`
 - Run `--tests "*WalkthroughReplayTest"` (about 30 s; needs the fetched walkthroughs) after changing hints, replay or exploration code. Every seed must cover every step (Zork I 386, II 261, III 184). The report is in `audioif/build/play/walkthrough-*.txt`.
 - Play harness: `--tests "*PlayHarness*" -Pplay=<commands.txt> -PplaySeed=1`. The output is `audioif/build/play/transcript.md`. A line starting with `~` simulates speech alternatives: `~ reed leaf lit | read leaflet`.
 - Don't run the whole unit-test task without `--tests` filters. It's slow.
@@ -55,6 +55,7 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
 
 ## Current state and open ideas (October 2026)
 - Version 2.0 is merged to `main`. The build with the version label hasn't been installed on the phone yet.
+- Audio mode writes play logs (`PlayLog`: what was said, recognizer alternatives with confidence, what was used and sent, speech errors). Get them with `adb pull /sdcard/Android/data/org.redrossistudios.audioif/files/logs`, or the user can tap "Share last play log" on the menu. Ask for one when debugging speech problems.
 - The original cause of the repeated speech ERROR_CLIENT on the phone is unknown (the logs had rotated). Watch logcat (`adb logcat -s SpeechRecognizer TTS`) if it recurs.
 - Possible next steps:
   - Playtest hints through Zork II and III on the phone.

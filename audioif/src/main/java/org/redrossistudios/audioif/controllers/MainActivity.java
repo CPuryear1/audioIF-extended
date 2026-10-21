@@ -33,6 +33,7 @@ import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.VoiceSettings;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.HintLoader;
+import org.redrossistudios.audioif.helpers.PlayLog;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
 import org.redrossistudios.audioif.helpers.ZGame;
 import org.redrossistudios.audioif.models.StoryFileType;
@@ -70,6 +71,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private int utteranceCounter = 0;
     private volatile String pendingUtteranceId;
     private CommandSession session;
+    private PlayLog playLog;
     private ZGame game;
     private AutoSave autoSave;
     private TextToSpeech tts;
@@ -140,6 +142,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         pendingUtteranceId = utteranceId;
         int queueMode = startsNewResponse ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD;
         setStatus("Reading\u2026 tap to skip");
+        log(text);
         tts.speak(text, queueMode, null, utteranceId);
     }
 
@@ -178,8 +181,12 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             }
             isListening = false;
             Log.w("SpeechRecognizer", "Recognition error: " + error);
+            if (playLog != null) {
+                playLog.event("speech error " + error + " (" + speechErrorName(error) + ")");
+            }
             if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                 setStatus("Microphone permission needed");
+                log("Microphone permission is required for voice commands.");
                 tts.speak("Microphone permission is required for voice commands.",
                         TextToSpeech.QUEUE_ADD, null, "permission-error");
                 return;
@@ -204,6 +211,9 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 return;
             }
             failedListens = 0;
+            if (playLog != null) {
+                playLog.heard(matches, results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES));
+            }
             handleSpeech(matches);
         }
 
@@ -222,6 +232,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         }
         failedListens = 0;
         pendingUtteranceId = null;
+        log("I'll stop listening for now. Tap the story when you're ready.");
         tts.speak("I'll stop listening for now. Tap the story when you're ready.",
                 TextToSpeech.QUEUE_ADD, null, "listen-paused");
         setStatus("Paused \u2014 tap the story to listen");
@@ -288,6 +299,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             game = new ZGame(executionControl, screenModel);
             session = new CommandSession(game);
             HintLoader.start(this, filePath, session);
+            playLog = new PlayLog(logFolder(this), new File(filePath).getName());
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
@@ -324,6 +336,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             autoSave = new AutoSave(new File(getFilesDir(), "autosave"), filePath);
             if (autoSave.exists() && game.loadState(autoSave.loadState())) {
                 String recap = autoSave.loadRecap();
+                playLog.event("resumed saved game");
                 session.start(recap);
                 storyField.setText(recap);
                 speakThenListen(AutoSave.RESUMED_NOTE, true);
@@ -351,6 +364,9 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     @Override
     protected void onPause() {
         saveProgress();
+        if (playLog != null) {
+            playLog.event("app in background");
+        }
         // The microphone isn't available in the background; listening there only fails.
         paused = true;
         stopVoiceInput();
@@ -362,6 +378,9 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         super.onResume();
         paused = false;
         failedListens = 0;
+        if (playLog != null) {
+            playLog.event("app in foreground");
+        }
         if (session != null && pendingUtteranceId == null && !isListening && tts != null && !tts.isSpeaking()) {
             startVoiceInput();
         }
@@ -459,7 +478,41 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
     private void handleButtonClick(){
+        if (playLog != null) {
+            playLog.typed(commandField.getText().toString());
+        }
         handleInput(commandField.getText().toString());
+    }
+
+    /** Where audio-mode play logs go: the app's folder on shared storage, readable over USB. */
+    public static File logFolder(Context context) {
+        File external = context.getExternalFilesDir("logs");
+        return external != null ? external : new File(context.getFilesDir(), "logs");
+    }
+
+    private void log(String said) {
+        if (playLog != null) {
+            playLog.said(said);
+        }
+    }
+
+    private static String speechErrorName(int error) {
+        switch (error) {
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: return "network timeout";
+            case SpeechRecognizer.ERROR_NETWORK: return "network";
+            case SpeechRecognizer.ERROR_AUDIO: return "audio";
+            case SpeechRecognizer.ERROR_SERVER: return "server";
+            case SpeechRecognizer.ERROR_CLIENT: return "client";
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT: return "no speech";
+            case SpeechRecognizer.ERROR_NO_MATCH: return "no match";
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: return "busy";
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: return "no permission";
+            case 10: return "too many requests";
+            case 11: return "server disconnected";
+            case 12: return "language not supported";
+            case 13: return "language unavailable";
+            default: return "unknown";
+        }
     }
 
     private void handleSpeech(List<String> alternatives) {
@@ -479,6 +532,9 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
     private void showAndSpeak(CommandSession.Result result) {
+        if (playLog != null) {
+            playLog.result(result);
+        }
         commandField.setText("");
         commandField.setVisibility(View.GONE);
         String text = result.text();

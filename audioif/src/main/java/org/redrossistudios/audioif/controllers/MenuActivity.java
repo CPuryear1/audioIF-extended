@@ -23,6 +23,7 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.GameLibrary;
+import org.redrossistudios.audioif.helpers.PlayLog;
 
 public class MenuActivity extends AppCompatActivity {
 
@@ -131,6 +132,41 @@ public class MenuActivity extends AppCompatActivity {
                 startActivity(browserIntent);
             }
         });
+        findViewById(R.id.shareLogButton).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                shareLastLog();
+            }
+        });
+    }
+
+    // Shares the newest audio-mode play log as text (email, chat, notes) for debugging speech.
+    private void shareLastLog() {
+        java.io.File log = PlayLog.latest(MainActivity.logFolder(this));
+        String text = null;
+        if (log != null) {
+            try {
+                text = PlayLog.read(log);
+            } catch (java.io.IOException e) {
+                text = null;
+            }
+        }
+        if (text == null || text.isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("No play log yet")
+                    .setMessage("Play a game in audio mode first. Each session is logged.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        // Very large texts can't be passed between apps; keep the end, where the latest play is.
+        int max = 200_000;
+        if (text.length() > max) {
+            text = "(start of log cut)\n" + text.substring(text.length() - max);
+        }
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "audio IF play log: " + log.getName());
+        send.putExtra(Intent.EXTRA_TEXT, text);
+        startActivity(Intent.createChooser(send, "Share play log"));
     }
 
 

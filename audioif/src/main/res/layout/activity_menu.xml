@@ -107,6 +107,15 @@
         android:drawableStart="@drawable/ic_explore"
         android:text="Browse supported games" />
 
+    <Button
+        android:id="@+id/shareLogButton"
+        style="@style/AdventureButton.Row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:drawableStart="@drawable/ic_share"
+        android:text="Share last play log" />
+
     <TextView
         android:id="@+id/versionLabel"
         android:layout_width="match_parent"
