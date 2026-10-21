@@ -29,6 +29,7 @@ import org.redrossistudios.audioif.helpers.Alert;
 import org.redrossistudios.audioif.helpers.CommandNormalizer;
 import org.redrossistudios.audioif.helpers.CommandSuggester;
 import org.redrossistudios.audioif.helpers.FileScanner;
+import org.redrossistudios.audioif.helpers.VoiceSettings;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
 import org.redrossistudios.audioif.models.StoryFileType;
@@ -341,6 +342,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                     || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                 Log.e("TTS", "This Language is not supported");
             } else {
+                VoiceSettings.apply(this, tts);
                 //Call speak stuff
                 fileScanner = new FileScanner(this);
                 progressDialog.dismiss();

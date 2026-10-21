@@ -29,6 +29,7 @@
         <activity android:name="org.redrossistudios.audioif.controllers.MainActivity"
                   android:configChanges="orientation|keyboard|keyboardHidden|screenSize">
         </activity>
+        <activity android:name="org.redrossistudios.audioif.controllers.VoiceSettingsActivity" />
         <activity android:name="org.redrossistudios.audioif.controllers.DownloadGamesActivity">
         </activity>
         <activity android:name="org.redrossistudios.audioif.controllers.TextModeActivity"

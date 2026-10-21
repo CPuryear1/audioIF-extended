@@ -25,7 +25,7 @@ The app asks for microphone permission the first time audio mode starts. Voice c
 
 If there is any problem or recommendation please let me know.
 
-Text to speech configuration: It gets the default configuration from your phone, so if you want to change speed of speech or language you can do it on android settings, language and input, text to speech output.
+Text to speech configuration: Tap "Reading voice" on the menu to choose any installed voice for your language (tap a voice to hear it) and set the speed and pitch. Audio mode uses these settings. "Reset to default" goes back to your phone's text-to-speech defaults (Android Settings → Accessibility → Text-to-speech output).
 
 Included and downloadable games:
 Zork I, Zork II and Zork III come with the app, so you can start playing right away. They appear in the game list in both audio and text mode.
@@ -63,6 +63,9 @@ The core of this application uses the ZMPP interpreter project: https://sourcefo
   - Not included: the graphical `.z6` games (Arthur, Journey, Zork Zero), and Hitchhiker's Guide and Shogun, which aren't on Masterpieces. Where Masterpieces had separate Mac and PC files, the PC file is used; Sherlock is the PC no-sound build.
   - The game list is in `InfocomCatalog`; add a `Game` entry (title, file name, MD5) to offer another download.
   - Saved games now go next to the game file, with its extension replaced by `.sav`. The old code cut the path at the first dot, which broke for paths containing dots such as the app's private folder.
+- Reading voice screen (`VoiceSettingsActivity`): lists the TTS engine's installed voices for the device language, with speed and pitch sliders (0.5x–2.0x). `VoiceSettings` saves the choice and applies it in audio mode after `setLanguage`. A saved voice that's later uninstalled is ignored.
+- The game list scan (`FileScanner`) runs on a background thread with a "Searching for games..." spinner. It used to walk all of shared storage on the UI thread, which froze audio mode (an ANR) on phones with many files. It now skips hidden folders and `Android/`, and stops 8 folders deep.
+- The menu no longer opens the "All files access" settings page on every launch. Bundled and downloaded games don't need that permission, so the app asks once with an explanation and an "Open settings" button.
 - Build toolchain upgraded to Android Gradle Plugin (AGP) 9.4.1 (see below).
 
 ### Android Gradle Plugin upgrade
