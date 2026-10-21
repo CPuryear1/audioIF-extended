@@ -28,7 +28,7 @@ public class CommandSuggesterTest {
     @Test
     public void replacesUnknownWordWithClosestDictionaryWords() {
         List<String> suggestions = CommandSuggester.suggest("take the lamq", DICTIONARY, 3);
-        assertEquals(Arrays.asList("take the lamb", "take the lamp", "take the lump"), suggestions);
+        assertEquals(Arrays.asList("take the lamb", "take the lamp"), suggestions);
     }
 
     @Test
@@ -48,7 +48,7 @@ public class CommandSuggesterTest {
     @Test
     public void truncatesInputToDictionaryEntryLength() {
         List<String> v3Dictionary = Arrays.asList("take", "lanter", "mailbo");
-        assertEquals(Collections.singletonList("take mailbo"),
+        assertEquals(Collections.singletonList("take mailbox"),
                 CommandSuggester.suggest("take mailbax", v3Dictionary, 3));
     }
 
@@ -80,5 +80,37 @@ public class CommandSuggesterTest {
         assertEquals(1, CommandSuggester.editDistance("lamp", "lamb"));
         assertEquals(3, CommandSuggester.editDistance("kitten", "sitting"));
         assertEquals(1, CommandSuggester.editDistance("bottel", "bottle"));
+    }
+
+    @Test
+    public void detectsSentenceLevelRejections() {
+        assertTrue(CommandSuggester.isRejection("There was no verb in that sentence!"));
+        assertTrue(CommandSuggester.isRejection("That sentence isn't one I recognize."));
+        assertTrue(CommandSuggester.isRejection("I beg your pardon?"));
+        assertTrue(CommandSuggester.suggest("the lamp", DICTIONARY, 3,
+                "There was no verb in that sentence!", null).isEmpty());
+    }
+
+    @Test
+    public void fixesTheWordTheGameNamed() {
+        List<String> dictionary = Arrays.asList("take", "lamp", "lame", "the", "open");
+        assertEquals(Arrays.asList("open the lamp"),
+                CommandSuggester.suggest("opem the lamp?", dictionary, 3, "I don't know the word \"opem\".", null));
+    }
+
+    @Test
+    public void objectSuggestionsMustHaveBeenSeen() {
+        List<String> dictionary = Arrays.asList("follow", "the", "south", "sound", "water");
+        assertTrue(CommandSuggester.suggest("follow the sonud", dictionary, 3,
+                "I don't know the word \"sonud\".", Arrays.asList("you", "hear", "water")).isEmpty());
+        assertEquals(Arrays.asList("follow the sound"), CommandSuggester.suggest("follow the sonud", dictionary, 3,
+                "I don't know the word \"sonud\".", Arrays.asList("a", "faint", "sound")));
+    }
+
+    @Test
+    public void expandsTruncatedWordsAndSkipsUnexpandable() {
+        List<String> v3Dictionary = Arrays.asList("open", "the", "contai", "zzzzzz");
+        assertEquals(Arrays.asList("open the container"), CommandSuggester.suggest("open the contaner", v3Dictionary, 3,
+                null, Arrays.asList("container")));
     }
 }

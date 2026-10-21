@@ -2,16 +2,14 @@ package org.redrossistudios.audioif.harness;
 
 import org.junit.Assume;
 import org.junit.Test;
-import org.redrossistudios.audioif.helpers.CommandInput;
-import org.redrossistudios.audioif.helpers.CommandNormalizer;
-import org.redrossistudios.audioif.helpers.CommandSuggester;
+import org.redrossistudios.audioif.helpers.CommandSession;
+import org.redrossistudios.audioif.helpers.ZGame;
 import org.zmpp.ExecutionControl;
 import org.zmpp.iff.FormChunk;
 import org.zmpp.iff.WritableFormChunk;
 import org.zmpp.io.IOSystem;
 import org.zmpp.vm.MachineFactory;
 import org.zmpp.vm.SaveGameDataStore;
-import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
 
 import java.io.File;
@@ -25,7 +23,7 @@ import java.util.List;
 
 /**
  * Developer tool: plays a game headlessly through the same input pipeline as
- * text mode (CommandInput -> CommandNormalizer/CommandSuggester -> ZMPP).
+ * text and audio mode (CommandSession -> CommandNormalizer/CommandSuggester -> ZMPP).
  *
  * Skipped unless given a commands file:
  *   gradlew :audioif:testDebugUnitTest --tests *PlayHarness* -Pplay=C:\path\commands.txt
@@ -40,11 +38,7 @@ public class PlayHarness {
 
     static final class Turn {
         String typed;
-        String sent;
-        String reply;
-        String response = "";
-        boolean rejected;
-        List<String> suggestions = new ArrayList<>();
+        CommandSession.Result result;
     }
 
     private BufferedScreenModel screenModel;
@@ -72,41 +66,27 @@ public class PlayHarness {
         outDir.mkdirs();
         start(new File(gamePath));
         executionControl.getMachine().random((short) -Math.abs(seed));
-        List<String> dictionaryWords = executionControl.getMachine().getDictionaryWords();
-        CommandNormalizer.Dictionary dictionary = word -> executionControl.getMachine().lookupToken(0, word) != 0;
-
-        String intro = readBuffer();
-        if (intro.length() <= 1) {
-            intro = send(" ");
-        }
+        ZGame game = new ZGame(executionControl, screenModel);
+        String intro = game.readIntro();
+        CommandSession session = new CommandSession(game);
+        session.start(intro);
 
         List<Turn> turns = new ArrayList<>();
-        List<String> pending = null;
         for (String typed : commands) {
             Turn turn = new Turn();
             turn.typed = typed;
-            CommandInput.Result resolved = CommandInput.resolve(typed, pending, dictionary);
-            pending = null;
-            if (resolved.reply != null) {
-                turn.reply = resolved.reply;
-                turns.add(turn);
-                continue;
-            }
-            turn.sent = resolved.command;
-            turn.response = send(resolved.command);
-            if (!resolved.command.trim().isEmpty() && CommandSuggester.isRejection(turn.response)) {
-                turn.rejected = true;
-                turn.suggestions = CommandSuggester.suggest(resolved.command, dictionaryWords, 3);
-                if (!turn.suggestions.isEmpty()) {
-                    pending = turn.suggestions;
-                }
-            }
+            turn.result = session.handle(typed);
             turns.add(turn);
         }
 
         write(new File(outDir, "transcript.md"), markdown(intro, turns, 0));
         write(new File(outDir, "latest.txt"), markdown(null, turns, Math.max(0, turns.size() - 3)));
         write(new File(outDir, "transcript.json"), json(turns));
+        int rejected = 0;
+        for (Turn turn : turns) {
+            rejected += turn.result.rejected ? 1 : 0;
+        }
+        write(new File(outDir, "summary.txt"), "inputs " + turns.size() + ", rejected " + rejected + "\n");
     }
 
     private void start(File game) throws Exception {
@@ -134,25 +114,6 @@ public class PlayHarness {
         executionControl.run();
     }
 
-    // Mirrors TextModeActivity.runCommand: an empty response means the game wants more input.
-    private String send(String command) {
-        String text = "";
-        for (int i = 0; i < 5 && text.length() <= 1; i++) {
-            executionControl.resumeWithInput(i == 0 ? command : " ");
-            text = readBuffer();
-        }
-        return text;
-    }
-
-    private String readBuffer() {
-        StringBuilder result = new StringBuilder();
-        for (AnnotatedText text : screenModel.getLowerBuffer()) {
-            result.append(text.getText());
-        }
-        String s = result.toString();
-        return s.length() > 2 ? s.substring(0, s.length() - 2).trim() : s;
-    }
-
     private static String markdown(String intro, List<Turn> turns, int from) {
         StringBuilder sb = new StringBuilder();
         if (intro != null) {
@@ -160,17 +121,25 @@ public class PlayHarness {
         }
         for (int i = from; i < turns.size(); i++) {
             Turn t = turns.get(i);
+            List<String> sent = t.result.sentCommands();
             sb.append("## ").append(i + 1).append(". > ").append(t.typed);
-            if (t.sent != null && !t.sent.trim().equalsIgnoreCase(t.typed.trim())) {
-                sb.append("  [sent: ").append(t.sent).append("]");
+            if (!(sent.size() == 1 && sent.get(0).trim().equalsIgnoreCase(t.typed.trim()))) {
+                sb.append("  [sent: ").append(String.join("; ", sent)).append("]");
             }
-            if (t.rejected) {
+            if (t.result.rejected) {
                 sb.append("  **REJECTED**");
             }
             sb.append("\n\n");
-            sb.append(t.reply != null ? "(app) " + t.reply : t.response).append("\n\n");
-            if (!t.suggestions.isEmpty()) {
-                sb.append("(app) ").append(CommandSuggester.buildPrompt(t.suggestions)).append("\n\n");
+            for (CommandSession.Exchange e : t.result.exchanges) {
+                if (e.response != null) {
+                    if (sent.size() > 1) {
+                        sb.append("> ").append(e.command).append("\n");
+                    }
+                    sb.append(e.response).append("\n\n");
+                }
+                if (e.note != null) {
+                    sb.append("(app) ").append(e.note).append("\n\n");
+                }
             }
         }
         return sb.toString();
@@ -182,15 +151,19 @@ public class PlayHarness {
             Turn t = turns.get(i);
             sb.append("  {\"n\":").append(i + 1)
                     .append(",\"typed\":").append(q(t.typed))
-                    .append(",\"sent\":").append(q(t.sent))
-                    .append(",\"appReply\":").append(q(t.reply))
-                    .append(",\"rejected\":").append(t.rejected)
+                    .append(",\"rejected\":").append(t.result.rejected)
                     .append(",\"suggestions\":[");
-            for (int j = 0; j < t.suggestions.size(); j++) {
-                sb.append(j > 0 ? "," : "").append(q(t.suggestions.get(j)));
+            for (int j = 0; j < t.result.suggestions.size(); j++) {
+                sb.append(j > 0 ? "," : "").append(q(t.result.suggestions.get(j)));
             }
-            sb.append("],\"response\":").append(q(t.response)).append("}")
-                    .append(i < turns.size() - 1 ? ",\n" : "\n");
+            sb.append("],\"exchanges\":[");
+            for (int j = 0; j < t.result.exchanges.size(); j++) {
+                CommandSession.Exchange e = t.result.exchanges.get(j);
+                sb.append(j > 0 ? "," : "").append("{\"sent\":").append(q(e.command))
+                        .append(",\"response\":").append(q(e.response))
+                        .append(",\"note\":").append(q(e.note)).append("}");
+            }
+            sb.append("]}").append(i < turns.size() - 1 ? ",\n" : "\n");
         }
         return sb.append("]\n").toString();
     }

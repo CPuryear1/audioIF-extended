@@ -10,7 +10,6 @@ import android.text.style.StyleSpan;
 import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -22,19 +21,17 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
-import org.redrossistudios.audioif.helpers.CommandInput;
-import org.redrossistudios.audioif.helpers.CommandNormalizer;
-import org.redrossistudios.audioif.helpers.CommandSuggester;
+import org.redrossistudios.audioif.helpers.CommandSession;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
+import org.redrossistudios.audioif.helpers.ZGame;
 import org.redrossistudios.audioif.models.StoryFileType;
 import org.zmpp.ExecutionControl;
 import org.zmpp.blorb.NativeImage;
 import org.zmpp.blorb.NativeImageFactory;
 import org.zmpp.io.IOSystem;
 import org.zmpp.vm.MachineFactory;
-import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
 
 import java.io.File;
@@ -63,8 +60,7 @@ public class TextModeActivity extends AppCompatActivity {
     private SavedGameManager savedGameManager;
     private String filePath;
     private TextModeActivity activity;
-    private List<String> dictionaryWords;
-    private List<String> pendingSuggestions;
+    private CommandSession session;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -120,25 +116,17 @@ public class TextModeActivity extends AppCompatActivity {
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
-            try {
-                dictionaryWords = executionControl.getMachine().getDictionaryWords();
-            } catch (Exception e) {
-                Log.w("CommandSuggester", "Could not read the game dictionary", e);
-                dictionaryWords = null;
-            }
+            ZGame game = new ZGame(executionControl, screenModel);
+            session = new CommandSession(game);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
                     handleButtonClick();
                 }
             });
-            String initialText = getBufferText(screenModel);
-            if(initialText.length() > 1){
-                storyField.append(initialText);
-            }
-            else{
-                runCommand(" ", " ");
-            }
+            String initialText = game.readIntro();
+            storyField.append(initialText);
+            session.start(initialText);
 
         } catch (Exception ex) {
             Alert.show("Error", ex.toString() + "\n" + ex.getMessage());
@@ -177,35 +165,25 @@ public class TextModeActivity extends AppCompatActivity {
     }
 
     private void handleButtonClick(){
-        String typed = commandField.getText().toString();
-        CommandInput.Result resolved = CommandInput.resolve(typed, pendingSuggestions, gameDictionary);
-        pendingSuggestions = null;
-        if (resolved.reply != null) {
-            appendCommandEcho(typed);
-            storyField.append("\n\n" + resolved.reply);
-            footer.requestFocus();
-            commandField.setText("");
+        if (session == null) {
             return;
         }
-        runCommand(typed, resolved.command);
-    }
-
-    private void runCommand(String typed, String command){
-        executionControl.resumeWithInput(command);
-        String currentText = getBufferText(screenModel);
-
-        if(currentText.length() > 1){
-            // Show what was actually sent when the normalizer or a suggestion changed it.
-            String echo = typed.trim().equalsIgnoreCase(command.trim()) ? typed : typed + "  [" + command + "]";
-            appendCommandEcho(echo);
-            storyField.append("\n\n" + currentText);
-            offerSuggestionsIfRejected(command, currentText);
-            footer.requestFocus();
-            commandField.setText("");
+        String typed = commandField.getText().toString();
+        CommandSession.Result result = session.handle(typed);
+        // Show what was actually sent when the app changed or split the command.
+        List<String> sent = result.sentCommands();
+        boolean unchanged = sent.size() == 1 && sent.get(0).trim().equalsIgnoreCase(typed.trim());
+        appendCommandEcho(unchanged || sent.isEmpty() ? typed : typed + "  [" + String.join("; ", sent) + "]");
+        for (CommandSession.Exchange exchange : result.exchanges) {
+            if (exchange.response != null && !exchange.response.trim().isEmpty()) {
+                storyField.append("\n\n" + exchange.response);
+            }
+            if (exchange.note != null) {
+                appendNote(exchange.note);
+            }
         }
-        else{
-            runCommand(" ", " ");
-        }
+        footer.requestFocus();
+        commandField.setText("");
     }
 
     private void appendCommandEcho(String echo) {
@@ -216,41 +194,13 @@ public class TextModeActivity extends AppCompatActivity {
         storyField.append(line);
     }
 
-    // Same rejection handling as audio mode, shown as text; type a number to choose.
-    private void offerSuggestionsIfRejected(String command, String gameResponse) {
-        if (command.trim().isEmpty() || dictionaryWords == null
-                || !CommandSuggester.isRejection(gameResponse)) {
-            return;
-        }
-        List<String> suggestions = CommandSuggester.suggest(command, dictionaryWords, 3);
-        if (!suggestions.isEmpty()) {
-            pendingSuggestions = suggestions;
-            storyField.append("\n\n" + CommandSuggester.buildPrompt(suggestions));
-        }
+    // App messages (help, suggestions, undo) are shown in italics to set them apart from the game.
+    private void appendNote(String note) {
+        SpannableString line = new SpannableString("\n\n" + note);
+        line.setSpan(new StyleSpan(Typeface.ITALIC), 0, line.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        storyField.append(line);
     }
 
-    private final CommandNormalizer.Dictionary gameDictionary = new CommandNormalizer.Dictionary() {
-        @Override
-        public boolean contains(String word) {
-            try {
-                return executionControl.getMachine().lookupToken(0, word) != 0;
-            } catch (Exception e) {
-                Log.w("CommandNormalizer", "Dictionary lookup failed for '" + word + "'", e);
-                return false;
-            }
-        }
-    };
-
-    private String getBufferText(BufferedScreenModel screenModel){
-        String result = "";
-        for (AnnotatedText text : screenModel.getLowerBuffer()) {
-            result += text.getText();
-        }
-        if(result.length() > 2){
-            return result.substring(0,result.length()-2).trim();
-        }
-        return result;
-    }
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         switch (keyCode) {

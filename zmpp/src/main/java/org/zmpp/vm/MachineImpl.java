@@ -653,6 +653,24 @@ public class MachineImpl implements Machine, DrawingArea {
     return null;
   }
 
+  /** {@inheritDoc} */
+  public PortableGameState captureInputState() {
+    final PortableGameState state = new PortableGameState();
+    // While waiting for input the PC still points at the read instruction.
+    state.captureMachineState(this, getPC());
+    return state;
+  }
+
+  /** {@inheritDoc} */
+  public void restoreInputState(final PortableGameState state) {
+    restart(false);
+    state.transferStateToMachine(this);
+    // transferStateToMachine() skips past a save instruction's store/branch
+    // byte; here we want to re-execute the read instruction itself.
+    setPC(state.getProgramCounter());
+    runstate = MachineRunState.RUNNING;
+  }
+
   // ***********************************************************************
   // ***** Private methods
   // **************************************

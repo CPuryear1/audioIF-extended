@@ -301,4 +301,18 @@ extends ObjectTree, Input, Output, Cpu, Memory, IZsciiEncoding, Serializable {
    * @return the portable game state
    */
   PortableGameState restore_undo();
+
+  /**
+   * Captures the complete game state while the machine is waiting for line
+   * input. Used for interpreter-level undo in games without an UNDO verb.
+   * @return the captured state
+   */
+  PortableGameState captureInputState();
+
+  /**
+   * Restores a state from {@link #captureInputState()}. Call
+   * ExecutionControl.run() afterwards so the machine waits for input again.
+   * @param state the state to restore
+   */
+  void restoreInputState(PortableGameState state);
 }

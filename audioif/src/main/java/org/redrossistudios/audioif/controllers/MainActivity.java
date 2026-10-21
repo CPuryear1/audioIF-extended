@@ -26,20 +26,18 @@ import android.widget.TextView;
 import org.redrossistudios.audioif.R;
 import org.redrossistudios.audioif.helpers.EdgeToEdge;
 import org.redrossistudios.audioif.helpers.Alert;
-import org.redrossistudios.audioif.helpers.CommandInput;
-import org.redrossistudios.audioif.helpers.CommandNormalizer;
-import org.redrossistudios.audioif.helpers.CommandSuggester;
+import org.redrossistudios.audioif.helpers.CommandSession;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.VoiceSettings;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
+import org.redrossistudios.audioif.helpers.ZGame;
 import org.redrossistudios.audioif.models.StoryFileType;
 import org.zmpp.ExecutionControl;
 import org.zmpp.blorb.NativeImage;
 import org.zmpp.blorb.NativeImageFactory;
 import org.zmpp.io.IOSystem;
 import org.zmpp.vm.MachineFactory;
-import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
 
 import java.io.File;
@@ -68,9 +66,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     private TextView statusView;
     private int utteranceCounter = 0;
     private volatile String pendingUtteranceId;
-    private List<String> dictionaryWords;
-    // Suggestions offered after a rejected command; non-null while waiting for a numbered choice.
-    private List<String> pendingSuggestions;
+    private CommandSession session;
     private TextToSpeech tts;
     private InputStream storyIs;
     private FileScanner fileScanner;
@@ -136,18 +132,6 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         });
     }
 
-    private final CommandNormalizer.Dictionary gameDictionary = new CommandNormalizer.Dictionary() {
-        @Override
-        public boolean contains(String word) {
-            try {
-                return executionControl.getMachine().lookupToken(0, word) != 0;
-            } catch (Exception e) {
-                Log.w("CommandNormalizer", "Dictionary lookup failed for '" + word + "'", e);
-                return false;
-            }
-        }
-    };
-
     private final RecognitionListener recognitionListener = new RecognitionListener() {
         @Override
         public void onReadyForSpeech(Bundle params) { }
@@ -191,15 +175,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 speakThenListen("Sorry, I didn't catch that. Please try again.", false);
                 return;
             }
-            String spoken = matches.get(0);
-            CommandInput.Result resolved = CommandInput.resolve(spoken, pendingSuggestions, gameDictionary);
-            pendingSuggestions = null;
-            if (resolved.reply != null) {
-                speakThenListen(resolved.reply, false);
-                return;
-            }
-            commandField.setText(resolved.command);
-            handleButtonClick();
+            handleInput(matches.get(0));
         }
 
         @Override
@@ -268,12 +244,8 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             executionControl.resizeScreen(100,500);
             screenModel.init(executionControl.getMachine(), executionControl.getZsciiEncoding());
             executionControl.run();
-            try {
-                dictionaryWords = executionControl.getMachine().getDictionaryWords();
-            } catch (Exception e) {
-                Log.w("CommandSuggester", "Could not read the game dictionary", e);
-                dictionaryWords = null;
-            }
+            ZGame game = new ZGame(executionControl, screenModel);
+            session = new CommandSession(game);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
@@ -306,15 +278,10 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                     return true;
                 }
             });
-            String initialText = getBufferText(screenModel);
-            if(initialText.length() > 1){
-                storyField.setText(initialText);
-                speakThenListen(storyField.getText().toString(), true);
-            }
-            else{
-                commandField.setText(" ");
-                handleButtonClick();
-            }
+            String initialText = game.readIntro();
+            session.start(initialText);
+            storyField.setText(initialText);
+            speakThenListen(initialText, true);
 
         } catch (Exception ex) {
             Alert.show("Error", ex.toString() + "\n" + ex.getMessage());
@@ -413,51 +380,45 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
     }
 
     private void handleButtonClick(){
-        pendingSuggestions = null;
-        String currentCommand = commandField.getText().toString();
-        String currentText = "";
-
-        executionControl.resumeWithInput(currentCommand);
-        currentText = getBufferText(screenModel);
-
-        if(currentText.length() > 1){
-            storyField.setText(currentText);
-            commandField.setText("");
-            commandField.setVisibility(View.GONE);
-            speakThenListen(storyField.getText().toString(), true);
-            offerSuggestionsIfRejected(currentCommand, currentText);
-        }
-        else{
-            commandField.setText(" ");
-            handleButtonClick();
-        }
+        handleInput(commandField.getText().toString());
     }
 
-    // If the game rejected the command, queue a numbered list of similar commands after the response.
-    private void offerSuggestionsIfRejected(String command, String gameResponse) {
-        if (command.trim().isEmpty() || dictionaryWords == null
-                || !CommandSuggester.isRejection(gameResponse)) {
+    // Runs speech or typed text through the shared session, then reads the game's
+    // replies followed by any app notes (suggestions, help, undo), and listens again.
+    private void handleInput(String input) {
+        if (session == null) {
             return;
         }
-        List<String> suggestions = CommandSuggester.suggest(command, dictionaryWords, 3);
-        Log.d("CommandSuggester", "Rejected '" + command + "' -> " + suggestions);
-        if (suggestions.isEmpty()) {
-            return;
+        CommandSession.Result result = session.handle(input);
+        commandField.setText("");
+        commandField.setVisibility(View.GONE);
+        String text = result.text();
+        storyField.setText(text);
+
+        StringBuilder responses = new StringBuilder();
+        List<String> notes = new ArrayList<>();
+        for (CommandSession.Exchange exchange : result.exchanges) {
+            if (exchange.response != null && !exchange.response.trim().isEmpty()) {
+                responses.append(responses.length() > 0 ? "\n\n" : "").append(exchange.response.trim());
+            }
+            if (exchange.note != null) {
+                notes.add(exchange.note);
+            }
         }
-        pendingSuggestions = suggestions;
-        speakThenListen(CommandSuggester.buildPrompt(suggestions), false);
+        boolean first = true;
+        if (responses.length() > 0) {
+            speakThenListen(responses.toString(), true);
+            first = false;
+        }
+        for (String note : notes) {
+            speakThenListen(note, first);
+            first = false;
+        }
+        if (first) {
+            speakThenListen(CommandSession.ASK_AGAIN, true);
+        }
     }
 
-    private String getBufferText(BufferedScreenModel screenModel){
-        String result = "";
-        for (AnnotatedText text : screenModel.getLowerBuffer()) {
-            result += text.getText();
-        }
-        if(result.length() > 2){
-            return result.substring(0,result.length()-2).trim();
-        }
-        return result;
-    }
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         switch (keyCode) {

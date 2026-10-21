@@ -25,8 +25,30 @@ public final class CommandSuggester {
             "that's not a verb i recognize",
             "you used the word",
             "i didn't understand that sentence",
-            "i only understood you as far as"
+            "i only understood you as far as",
+            "there was no verb in that sentence",
+            "that sentence isn't one i recognize",
+            "that sentence isn't one i recognise",
+            "i beg your pardon",
+            "i don't understand that"
     ));
+
+    /** Messages saying the sentence itself was malformed, with no specific word to fix. */
+    private static final List<String> SENTENCE_PHRASES = Arrays.asList(
+            "there was no verb in that sentence",
+            "that sentence isn't one i recogni",
+            "i beg your pardon",
+            "i didn't understand that sentence",
+            "i don't understand that"
+    );
+
+    /** Full spellings for common words that games store truncated (e.g. "northe"). */
+    private static final List<String> COMMON_FULL_WORDS = Arrays.asList(
+            "northeast", "northwest", "southeast", "southwest", "container", "unscrew", "staircase",
+            "stairway", "examine", "inventory", "lantern", "mailbox", "leaflet", "advertisement",
+            "unlock", "inflate", "deflate", "restart", "restore", "verbose", "brief", "superbrief",
+            "diagnose", "unlight", "extinguish", "squeeze", "trapdoor", "painting", "sandwich",
+            "skeleton", "screwdriver", "wrench", "torch", "garlic", "bottle", "window", "kitchen");
 
     /** Words that are never replaced when the game says it can't see something. */
     private static final Set<String> STOP_WORDS = new HashSet<>(Arrays.asList(
@@ -78,11 +100,24 @@ public final class CommandSuggester {
      * shared prefix, then by smallest length difference.
      */
     public static List<String> suggest(String command, Collection<String> dictionaryWords, int limit) {
+        return suggest(command, dictionaryWords, limit, null, null);
+    }
+
+    /**
+     * Like {@link #suggest(String, Collection, int)}, but uses the game's reply to
+     * pick the word to fix ("I don't know the word "contai"") and expands words
+     * the game stores truncated ("northe") to full words seen in
+     * {@code fullWords} or a built-in list; truncated words that can't be
+     * expanded are not suggested when {@code fullWords} is given. Returns no
+     * suggestions when the reply says the sentence as a whole made no sense.
+     */
+    public static List<String> suggest(String command, Collection<String> dictionaryWords, int limit,
+                                       String gameResponse, Collection<String> fullWords) {
         List<String> result = new ArrayList<>();
         if (command == null || dictionaryWords == null || dictionaryWords.isEmpty() || limit <= 0) {
             return result;
         }
-        String[] words = command.toLowerCase(Locale.ROOT).trim().split("\\s+");
+        String[] words = CommandNormalizer.clean(command).split("\\s+");
         if (words.length == 0 || words[0].isEmpty()) {
             return result;
         }
@@ -100,10 +135,26 @@ public final class CommandSuggester {
             return result;
         }
 
+        String response = gameResponse == null ? "" : gameResponse.toLowerCase(Locale.ROOT).replace('\u2019', '\'');
+        String namedWord = namedWord(response);
         List<Integer> positions = new ArrayList<>();
-        for (int i = 0; i < words.length; i++) {
-            if (!dictionary.contains(truncate(words[i], maxEntryLength))) {
-                positions.add(i);
+        if (namedWord != null) {
+            for (int i = 0; i < words.length; i++) {
+                if (truncate(words[i], maxEntryLength).equals(truncate(namedWord, maxEntryLength))) {
+                    positions.add(i);
+                }
+            }
+        }
+        if (positions.isEmpty()) {
+            for (String phrase : SENTENCE_PHRASES) {
+                if (response.contains(phrase)) {
+                    return result;
+                }
+            }
+            for (int i = 0; i < words.length; i++) {
+                if (!dictionary.contains(truncate(words[i], maxEntryLength))) {
+                    positions.add(i);
+                }
             }
         }
         if (positions.isEmpty()) {
@@ -114,18 +165,48 @@ public final class CommandSuggester {
             }
         }
 
+        List<String> knownFullWords = new ArrayList<>(COMMON_FULL_WORDS);
+        Set<String> seenWords = new HashSet<>();
+        if (fullWords != null) {
+            for (String word : fullWords) {
+                String lower = word.toLowerCase(Locale.ROOT);
+                knownFullWords.add(lower);
+                seenWords.add(truncate(lower, maxEntryLength));
+            }
+        }
+
         List<Candidate> candidates = new ArrayList<>();
         for (int position : positions) {
             String original = truncate(words[position], maxEntryLength);
-            int maxDistance = Math.max(2, original.length() / 2);
+            if (original.length() < 2) {
+                continue;
+            }
+            int maxDistance = original.length() <= 4 ? 1 : 2;
             for (String entry : dictionary) {
-                if (entry.equals(original)) {
+                if (entry.equals(original) || entry.length() < 2) {
+                    continue;
+                }
+                // Object words must be things the game has mentioned; you can't refer to unseen things.
+                if (fullWords != null && position > 0 && !seenWords.contains(entry)) {
                     continue;
                 }
                 int distance = editDistance(original, entry);
                 if (distance <= maxDistance) {
+                    String spelled = entry;
+                    if (entry.length() == maxEntryLength) {
+                        spelled = expand(entry, knownFullWords);
+                        if (spelled == null) {
+                            if (fullWords != null) {
+                                continue;
+                            }
+                            spelled = entry;
+                        }
+                    }
+                    if (spelled.equals(words[position])) {
+                        continue;
+                    }
                     String[] replaced = words.clone();
-                    replaced[position] = entry;
+                    replaced[position] = spelled;
                     candidates.add(new Candidate(join(replaced), distance,
                             commonPrefixLength(original, entry),
                             Math.abs(original.length() - entry.length())));
@@ -214,6 +295,23 @@ public final class CommandSuggester {
             i++;
         }
         return i;
+    }
+
+    /** Returns X from replies like: I don't know the word "X". */
+    static String namedWord(String response) {
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("the word [\"'\u201c]([a-z]+)[\"'\u201d]").matcher(response);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private static String expand(String truncated, List<String> fullWords) {
+        String best = null;
+        for (String word : fullWords) {
+            if (word.startsWith(truncated) && (best == null || word.length() < best.length())) {
+                best = word;
+            }
+        }
+        return best;
     }
 
     private static String numberWord(int n) {
