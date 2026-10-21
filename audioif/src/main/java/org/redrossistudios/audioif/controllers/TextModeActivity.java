@@ -25,6 +25,7 @@ import org.redrossistudios.audioif.helpers.AutoSave;
 import org.redrossistudios.audioif.helpers.CommandSession;
 import org.redrossistudios.audioif.helpers.FileScanner;
 import org.redrossistudios.audioif.helpers.SavedGameManager;
+import org.redrossistudios.audioif.helpers.HintLoader;
 import org.redrossistudios.audioif.helpers.StoryFileTypeChecker;
 import org.redrossistudios.audioif.helpers.ZGame;
 import org.redrossistudios.audioif.models.StoryFileType;
@@ -121,6 +122,7 @@ public class TextModeActivity extends AppCompatActivity {
             executionControl.run();
             game = new ZGame(executionControl, screenModel);
             session = new CommandSession(game);
+            HintLoader.start(this, filePath, session);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {

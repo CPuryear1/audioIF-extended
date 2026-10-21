@@ -70,6 +70,19 @@ public class PlayHarness {
         String intro = game.readIntro();
         CommandSession session = new CommandSession(game);
         session.start(intro);
+        // Walkthrough hints, as in the app, when tools/fetch-walkthroughs.ps1 has fetched one.
+        File storyFile = new File(gamePath);
+        String storyName = storyFile.getName().replaceFirst("\\.[^.]+$", "");
+        File walkthrough = new File("src/main/assets/walkthroughs/" + storyName + ".txt");
+        if (walkthrough.exists()) {
+            org.redrossistudios.audioif.helpers.WalkthroughIndex index =
+                    org.redrossistudios.audioif.helpers.HintCatalog.load(storyName,
+                            Files.readAllBytes(storyFile.toPath()),
+                            new String(Files.readAllBytes(walkthrough.toPath()), StandardCharsets.ISO_8859_1),
+                            new File(outDir, "hints"));
+            session.setHintAdvisor(index == null ? null
+                    : new org.redrossistudios.audioif.helpers.HintAdvisor(index));
+        }
 
         List<Turn> turns = new ArrayList<>();
         for (String typed : commands) {

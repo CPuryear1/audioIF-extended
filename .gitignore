@@ -23,6 +23,9 @@ out/
 .gradle/
 build/
 
+# Third-party walkthroughs fetched by tools/fetch-walkthroughs.ps1 (personal builds only)
+audioif/src/main/assets/walkthroughs/
+
 # Signing files
 .signing/
 

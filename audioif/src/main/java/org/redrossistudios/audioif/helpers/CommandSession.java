@@ -38,6 +38,11 @@ public final class CommandSession {
         /** The current room from the status line, or null if unknown. */
         String currentRoom();
 
+        /** Puzzle-relevant game state (see {@link GameStateReader}), or null if unsupported. */
+        default int[] stateVector() {
+            return null;
+        }
+
         /** Captures the state for undo, or returns null if unsupported. */
         Object snapshot();
 
@@ -123,9 +128,16 @@ public final class CommandSession {
     private static final int MAX_REPEAT = 5;
     private static final int MAX_WALK = 25;
 
-    private static final Set<String> HELP_PHRASES = canonicalSet("help", "help me", "commands",
+    static final String HINTS_LOADING = "Hints for this game are still loading. Ask again in a moment, "
+            + "or say commands for a list of commands.";
+
+    static final String HINTS_NOTE = " Say help or hint for advice on what to do next.";
+
+    // "help" asks for a hint when the game has a walkthrough, else for the command list.
+    private static final Set<String> HELP_OR_HINT_PHRASES = canonicalSet("help", "help me");
+    private static final Set<String> HELP_PHRASES = canonicalSet("commands",
             "what can i do", "what can i say", "how do i play", "instructions", "list the commands",
-            "what are the commands");
+            "what are the commands", "list commands", "command list");
     private static final Set<String> HINT_PHRASES = canonicalSet("hint", "hints", "give me a hint",
             "i need a hint", "i am stuck", "clue", "give me a clue", "any hints", "what should i do",
             "what do i do", "what now", "now what", "what next", "what do i do next", "what should i do next",
@@ -238,6 +250,8 @@ public final class CommandSession {
     private List<String> pending;
     private final Deque<Snapshot> undo = new ArrayDeque<>();
     private final Map<String, Map<String, String>> map = new LinkedHashMap<>();
+    // Exits in the map that are only guessed as the opposite of a move ("room\tdirection").
+    private final Set<String> guessedExits = new HashSet<>();
     private final Set<String> vocabulary = new LinkedHashSet<>();
     private String room;
     private Move lastMove;
@@ -247,8 +261,22 @@ public final class CommandSession {
     private final Map<String, String> roomTexts = new HashMap<>();
     private final Deque<String> recentResponses = new ArrayDeque<>();
 
+    private volatile HintAdvisor hints;
+    private volatile boolean hintsLoading;
+
     public CommandSession(Game game) {
         this.game = game;
+    }
+
+    /** Call with true while a walkthrough index loads in the background. */
+    public void setHintsLoading(boolean loading) {
+        hintsLoading = loading;
+    }
+
+    /** Answers help and hint requests from a walkthrough; null for the generic answers. */
+    public void setHintAdvisor(HintAdvisor advisor) {
+        hints = advisor;
+        hintsLoading = false;
     }
 
     /** Call with the game's opening text so the starting room is known. */
@@ -256,7 +284,7 @@ public final class CommandSession {
         learnVocabulary(introText);
         roomDescription = introText;
         String status = game.currentRoom();
-        room = status != null ? status : roomFromResponse(introText, true);
+        room = status != null ? status : lastRoomName(introText);
         if (room != null) {
             map.computeIfAbsent(room, k -> new LinkedHashMap<>());
             rememberRoomText(room, introText);
@@ -302,12 +330,14 @@ public final class CommandSession {
         }
 
         String canonical = CommandNormalizer.canonicalize(text);
-        if (HELP_PHRASES.contains(canonical) && !game.contains("help")) {
-            result.note(HELP_TEXT);
+        boolean hintsOffered = hints != null || hintsLoading;
+        boolean helpOrHint = HELP_OR_HINT_PHRASES.contains(canonical) && !game.contains("help");
+        if (helpOrHint && !hintsOffered || HELP_PHRASES.contains(canonical) && !game.contains("help")) {
+            result.note(hintsOffered ? HELP_TEXT + HINTS_NOTE : HELP_TEXT);
             return result;
         }
-        if (HINT_PHRASES.contains(canonical) && !game.contains("hint")) {
-            result.note(HINT_TEXT);
+        if (helpOrHint || HINT_PHRASES.contains(canonical) && !game.contains("hint")) {
+            result.note(hint());
             return result;
         }
         if (UNDO_PHRASES.contains(canonical) && !game.contains("undo")) {
@@ -579,10 +609,11 @@ public final class CommandSession {
                 // Any command that changes the room is a way between them ("go inside", "climb the stairs").
                 String key = direction != null ? direction : lowerCommand;
                 map.computeIfAbsent(before, k -> new LinkedHashMap<>()).put(key, after);
+                guessedExits.remove(before + "\t" + key);
                 // Assume the way back is the opposite direction until a move proves otherwise.
                 String opposite = OPPOSITE.get(key);
-                if (opposite != null) {
-                    map.get(after).putIfAbsent(opposite, before);
+                if (opposite != null && map.get(after).putIfAbsent(opposite, before) == null) {
+                    guessedExits.add(after + "\t" + opposite);
                 }
                 lastMove = new Move(key, before, after);
             }
@@ -594,6 +625,7 @@ public final class CommandSession {
         }
         if (direction != null && before != null && before.equals(room) && map.containsKey(before)) {
             map.get(before).remove(direction);
+            guessedExits.remove(before + "\t" + direction);
         }
         recentResponses.addLast(response == null ? "" : response);
         while (recentResponses.size() > 6) {
@@ -874,6 +906,26 @@ public final class CommandSession {
         return best;
     }
 
+    private String hint() {
+        HintAdvisor advisor = hints;
+        int[] state = advisor == null ? null : game.stateVector();
+        if (state != null) {
+            // Directions in hints should be right, so leave out the map's guesses.
+            Map<String, Map<String, String>> visited = new LinkedHashMap<>();
+            for (Map.Entry<String, Map<String, String>> entry : map.entrySet()) {
+                Map<String, String> exits = new LinkedHashMap<>();
+                for (Map.Entry<String, String> exit : entry.getValue().entrySet()) {
+                    if (!guessedExits.contains(entry.getKey() + "\t" + exit.getKey())) {
+                        exits.put(exit.getKey(), exit.getValue());
+                    }
+                }
+                visited.put(entry.getKey(), exits);
+            }
+            return advisor.hint(state, room, visited);
+        }
+        return hintsLoading ? HINTS_LOADING : HINT_TEXT;
+    }
+
     private List<String> route(String from, String to) {
         if (from == null) {
             return null;
@@ -1042,6 +1094,20 @@ public final class CommandSession {
             String line = lines[i].trim();
             if (looksLikeRoomName(line)) {
                 return line;
+            }
+        }
+        return null;
+    }
+
+    // The intro's title and copyright come first; the room heading is the last one.
+    static String lastRoomName(String text) {
+        if (text == null) {
+            return null;
+        }
+        String[] lines = text.trim().split("\\r?\\n");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            if (looksLikeRoomName(lines[i].trim())) {
+                return lines[i].trim();
             }
         }
         return null;

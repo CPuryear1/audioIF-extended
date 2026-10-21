@@ -83,6 +83,13 @@ public class CommandSessionTest {
             return room;
         }
 
+        int[] state;
+
+        @Override
+        public int[] stateVector() {
+            return state;
+        }
+
         @Override
         public Object snapshot() {
             return room;
@@ -193,6 +200,26 @@ public class CommandSessionTest {
         assertEquals(CommandSession.HELP_TEXT, session.handle("Help").text());
         assertEquals(CommandSession.HINT_TEXT, session.handle("what should I do now?").text());
         assertTrue(game.sent.isEmpty());
+    }
+
+    @Test
+    public void helpGivesWalkthroughHintsOnceLoaded() {
+        session.setHintsLoading(true);
+        assertEquals(CommandSession.HINTS_LOADING, session.handle("help").text());
+        assertEquals(CommandSession.HELP_TEXT + CommandSession.HINTS_NOTE, session.handle("commands").text());
+
+        game.state = new int[] {0};
+        session.setHintAdvisor(new HintAdvisor(new WalkthroughIndex(java.util.Arrays.asList(
+                new WalkthroughIndex.Step("n", "Field", "Path", new int[0], new int[0]),
+                new WalkthroughIndex.Step("open box", "Path", null, new int[] {0}, new int[] {1})))));
+        assertEquals("Your next step is somewhere else, at Path. Say help again for directions.",
+                session.handle("help").text());
+        assertEquals("From here, go north. Say help again to hear what to do there.",
+                session.handle("hint").text());
+        session.handle("n");
+        assertEquals("Try: open box.", session.handle("I'm stuck").text());
+        assertEquals(CommandSession.HELP_TEXT + CommandSession.HINTS_NOTE, session.handle("how do I play").text());
+        assertEquals(Arrays.asList("n"), game.sent);
     }
 
     @Test
