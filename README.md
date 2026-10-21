@@ -68,6 +68,11 @@ The core of this application uses the ZMPP interpreter project: https://sourcefo
 - The menu no longer opens the "All files access" settings page on every launch. Bundled and downloaded games don't need that permission, so the app asks once with an explanation and an "Open settings" button.
 - "Classic adventure" visual theme. A dark ink/parchment palette with amber accents (`res/values/colors.xml`, `styles.xml`), serif story text, rounded buttons with Material icons, and styled dialogs. The menu was redesigned with a title header and a large primary audio-mode button. Audio mode shows a status pill ("Reading… tap to skip", "Listening… say a command", "Paused — tap the story to listen"). In text mode, command echoes are shown in amber. The game picker is a compact titled dialog that hides file extensions.
 - Build toolchain upgraded to Android Gradle Plugin (AGP) 9.4.1 (see below).
+- Headless play harness for testing command handling (`audioif/src/test/java/.../harness/PlayHarness.java`). It plays a game on the desktop JVM through the same input path as text mode (`CommandInput` → `CommandNormalizer`/`CommandSuggester` → ZMPP).
+  - Write one command per line to a text file, then run `gradlew :audioif:testDebugUnitTest --tests "*PlayHarness*" -Pplay=C:\path\commands.txt`. Optional flags: `-PplayGame=<story file>` (default: bundled Zork I) and `-PplaySeed=<n>`.
+  - Each run replays the file from the start with a seeded random generator, so results are repeatable.
+  - Output goes to `audioif/build/play/`: `transcript.md` (with `[sent: …]` and **REJECTED** markers), `transcript.json` and `latest.txt`.
+  - Without `-Pplay` the test is skipped.
 
 ### Android Gradle Plugin upgrade
 The original project used AGP 3.2.0, which can't parse the manifest `<queries>` element. Android 11+ needs that element to let the app find the speech recognition service (`android.speech.RecognitionService`), so the build was upgraded to the latest stable AGP:

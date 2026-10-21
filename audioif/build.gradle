@@ -19,6 +19,17 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+    // Headless play harness (see PlayHarness.java): -Pplay=<commands file> [-PplayGame=...] [-PplaySeed=...]
+    testOptions {
+        unitTests.all {
+            systemProperty 'play.commands', project.findProperty('play') ?: ''
+            systemProperty 'play.game', project.findProperty('playGame') ?: ''
+            systemProperty 'play.seed', project.findProperty('playSeed') ?: '1234'
+            if (project.hasProperty('play')) {
+                outputs.upToDateWhen { false }
+            }
+        }
+    }
 }
 
 dependencies {
