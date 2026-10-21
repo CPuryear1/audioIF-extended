@@ -435,6 +435,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             return;
         }
         List<String> suggestions = CommandSuggester.suggest(command, dictionaryWords, 3);
+        Log.d("CommandSuggester", "Rejected '" + command + "' -> " + suggestions);
         if (suggestions.isEmpty()) {
             return;
         }

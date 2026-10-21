@@ -49,6 +49,19 @@ public class CommandNormalizerTest {
     }
 
     @Test
+    public void fallsBackToExamineWhenGameLacksX() {
+        CommandNormalizer.Dictionary zork1 = new CommandNormalizer.Dictionary() {
+            @Override
+            public boolean contains(String word) {
+                return !word.equals("x") && !word.equals("check");
+            }
+        };
+        assertEquals("examine the mailbox", CommandNormalizer.normalize("check the mailbox", zork1));
+        assertEquals("examine lamp", CommandNormalizer.normalize("Inspect lamp", zork1));
+        assertEquals("x mailbox", CommandNormalizer.normalize("check out mailbox", ALL_WORDS));
+    }
+
+    @Test
     public void leavesTextUnchangedWhenGameLacksCanonicalWord() {
         assertEquals("examine lamp", CommandNormalizer.normalize("examine lamp", NO_WORDS));
         assertEquals("North West", CommandNormalizer.normalize("North West", NO_WORDS));

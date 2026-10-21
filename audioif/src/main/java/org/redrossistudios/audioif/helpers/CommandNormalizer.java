@@ -37,8 +37,15 @@ public final class CommandNormalizer {
         putDirection("up", "U");
         putDirection("down", "D");
 
-        put("examine", "x");
-        put("look at", "x");
+        // "x|examine": use "x" if the game knows it, otherwise fall back to "examine".
+        put("examine", "x|examine");
+        put("look at", "x|examine");
+        put("check", "x|examine");
+        put("check out", "x|examine");
+        put("inspect", "x|examine");
+        put("study", "x|examine");
+        put("look inside", "look in");
+        put("look into", "look in");
         put("inventory", "i");
         put("wait", "z");
         put("again", "g");
@@ -46,7 +53,11 @@ public final class CommandNormalizer {
 
     private CommandNormalizer() { }
 
-    /** Adds or replaces a mapping from a spoken phrase to a canonical command. */
+    /**
+     * Adds or replaces a mapping from a spoken phrase to a canonical command.
+     * Separate fallbacks with "|", e.g. "x|examine"; the first whose verb the
+     * game knows is used.
+     */
     public static void put(String spokenPhrase, String canonicalCommand) {
         PHRASES.put(clean(spokenPhrase), canonicalCommand);
     }
@@ -76,12 +87,14 @@ public final class CommandNormalizer {
         if (bestPhrase == null) {
             return spoken.trim();
         }
-        String canonical = PHRASES.get(bestPhrase);
-        String canonicalVerb = canonical.split(" ")[0].toLowerCase(Locale.ROOT);
-        if (dictionary != null && !dictionary.contains(canonicalVerb)) {
-            return spoken.trim();
+        String rest = text.substring(bestPhrase.length());
+        for (String canonical : PHRASES.get(bestPhrase).split("\\|")) {
+            String canonicalVerb = canonical.split(" ")[0].toLowerCase(Locale.ROOT);
+            if (dictionary == null || dictionary.contains(canonicalVerb)) {
+                return (canonical + rest).trim();
+            }
         }
-        return (canonical + text.substring(bestPhrase.length())).trim();
+        return spoken.trim();
     }
 
     private static String clean(String text) {
