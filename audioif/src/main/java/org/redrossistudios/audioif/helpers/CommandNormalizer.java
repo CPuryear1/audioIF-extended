@@ -341,6 +341,27 @@ public final class CommandNormalizer {
         return DIRECTIONS.get(clean(text));
     }
 
+    /** Every word the normalizer itself understands (phrases, fillers, directions), for speech matching. */
+    public static Set<String> knownWords() {
+        Set<String> words = new HashSet<>();
+        List<String> phrases = new ArrayList<>(PHRASES.keySet());
+        phrases.addAll(EXACT.keySet());
+        phrases.addAll(LEADING_FILLERS);
+        phrases.addAll(TRAILING_FILLERS);
+        phrases.addAll(DIRECTIONS.keySet());
+        phrases.addAll(WORD_REPLACEMENTS.keySet());
+        phrases.addAll(CONTRACTIONS.values());
+        phrases.addAll(GERUNDS.keySet());
+        phrases.addAll(MOTION_VERBS);
+        phrases.addAll(PATH_NOUNS);
+        phrases.addAll(ROOM_WORDS);
+        for (String phrase : phrases) {
+            words.addAll(Arrays.asList(phrase.split(" ")));
+        }
+        words.remove("");
+        return words;
+    }
+
     /**
      * Normalizes a spoken command. A mapping is applied only if the first word of
      * its canonical command is in the game's dictionary (when one is supplied);
