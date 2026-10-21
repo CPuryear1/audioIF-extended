@@ -12,6 +12,7 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
     - `CommandSession` is the shared input path for audio and text mode: room memory, "go to X", "go back", help and hints.
     - `CommandNormalizer` maps natural language to game commands.
     - `CommandSuggester` offers "Did you mean…" choices.
+    - `SpeechMatcher` picks the best recognizer alternative and fixes misheard game words (`CommandSession.handleSpeech`).
   - `helpers/`, game:
     - `ZGame` wraps ZMPP.
     - `AutoSave` resumes the game when you return to the app.
@@ -33,9 +34,9 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
 
 ## Tests
 - Fast tests, run after most changes:
-  `.\gradlew.bat :audioif:testDebugUnitTest --console=plain -q --tests "*WalkthroughParserTest" --tests "*InfocomCatalogTest" --tests "*HintAdvisorTest" --tests "*CommandSuggesterTest" --tests "*CommandSessionTest" --tests "*CommandNormalizerTest" --tests "*AutoSaveTest"`
+  `.\gradlew.bat :audioif:testDebugUnitTest --console=plain -q --tests "*WalkthroughParserTest" --tests "*InfocomCatalogTest" --tests "*HintAdvisorTest" --tests "*CommandSuggesterTest" --tests "*CommandSessionTest" --tests "*CommandNormalizerTest" --tests "*AutoSaveTest" --tests "*SpeechMatcherTest"`
 - Run `--tests "*WalkthroughReplayTest"` (about 30 s; needs the fetched walkthroughs) after changing hints, replay or exploration code. Every seed must cover every step (Zork I 386, II 261, III 184). The report is in `audioif/build/play/walkthrough-*.txt`.
-- Play harness: `--tests "*PlayHarness*" -Pplay=<commands.txt> -PplaySeed=1`. The output is `audioif/build/play/transcript.md`.
+- Play harness: `--tests "*PlayHarness*" -Pplay=<commands.txt> -PplaySeed=1`. The output is `audioif/build/play/transcript.md`. A line starting with `~` simulates speech alternatives: `~ reed leaf lit | read leaflet`.
 - Don't run the whole unit-test task without `--tests` filters. It's slow.
 - When the hint cache format changes, bump `WalkthroughIndex.FORMAT`, or old caches (the app's `files/hints` folder and `audioif/build/play/hints`) will be reused.
 
@@ -49,6 +50,7 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
 - Rooms are identified by name plus `#` and the location object (global 0, read from the state vector), because Zork reuses room names such as "Clearing" and "Forest". Speak only the name (`HintAdvisor.roomName`).
 - Zork's map isn't symmetric. Routes use only exits that the replay actually tried. Guessed reverse exits (`CommandSession.guessedExits`) are left out of the hint routes.
 - ZMPP's random generator isn't saved in snapshots, so exploring or retrying changes later random events. The replay retries failed steps from earlier snapshots.
+- "help" describes the current situation (`CommandSession.situation`: room, visible things, exits, things to try); "hint" gives walkthrough hints; "how do I play" reads the guide. Fetch walkthroughs before building an APK for the phone, or hints are missing.
 - Speech: on ERROR_CLIENT, busy or disconnected errors the recognizer is recreated. Listening pauses after 3 misses in a row, or while the app is in the background.
 
 ## Current state and open ideas (October 2026)

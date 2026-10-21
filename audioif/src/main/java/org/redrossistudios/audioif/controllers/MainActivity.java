@@ -13,6 +13,7 @@ import android.speech.tts.UtteranceProgressListener;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AppCompatActivity;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -105,6 +106,12 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag());
         intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getPackageName());
+        // Several guesses let CommandSession pick the one that matches the game's words.
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+        if (session != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS,
+                    new ArrayList<>(session.speechHints()));
+        }
         isListening = true;
         setStatus("Listening\u2026 say a command");
         speechRecognizer.startListening(intent);
@@ -197,7 +204,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 return;
             }
             failedListens = 0;
-            handleInput(matches.get(0));
+            handleSpeech(matches);
         }
 
         @Override
@@ -327,6 +334,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
                 session.start(initialText);
                 storyField.setText(initialText);
                 speakThenListen(initialText, true);
+                speakThenListen(CommandSession.WELCOME_TIP, false);
             }
 
         } catch (Exception ex) {
@@ -454,17 +462,28 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
         handleInput(commandField.getText().toString());
     }
 
+    private void handleSpeech(List<String> alternatives) {
+        if (session == null) {
+            return;
+        }
+        showAndSpeak(session.handleSpeech(alternatives));
+    }
+
     // Runs speech or typed text through the shared session, then reads the game's
     // replies followed by any app notes (suggestions, help, undo), and listens again.
     private void handleInput(String input) {
         if (session == null) {
             return;
         }
-        CommandSession.Result result = session.handle(input);
+        showAndSpeak(session.handle(input));
+    }
+
+    private void showAndSpeak(CommandSession.Result result) {
         commandField.setText("");
         commandField.setVisibility(View.GONE);
         String text = result.text();
-        storyField.setText(text);
+        // Show what the app heard, so a misheard command is easy to spot.
+        storyField.setText(result.heard != null ? "> " + result.heard + "\n\n" + text : text);
         saveProgress();
 
         StringBuilder responses = new StringBuilder();

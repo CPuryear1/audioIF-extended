@@ -105,6 +105,13 @@ public class CommandSessionTest {
         public boolean contains(String word) {
             return words.contains(word);
         }
+
+        List<String> things = new ArrayList<>();
+
+        @Override
+        public List<String> thingsHere() {
+            return room.equals("Field") ? things : new ArrayList<>();
+        }
     }
 
     private FakeGame game;
@@ -197,28 +204,78 @@ public class CommandSessionTest {
 
     @Test
     public void helpAndHintAreAnsweredByTheApp() {
-        assertEquals(CommandSession.HELP_TEXT, session.handle("Help").text());
+        assertEquals(CommandSession.HELP_TEXT, session.handle("how do I play").text());
+        assertEquals(CommandSession.HELP_TEXT, session.handle("commands").text());
         assertEquals(CommandSession.HINT_TEXT, session.handle("what should I do now?").text());
+        assertTrue(session.handle("Help").text().startsWith("You're at Field."));
         assertTrue(game.sent.isEmpty());
     }
 
     @Test
-    public void helpGivesWalkthroughHintsOnceLoaded() {
+    public void helpDescribesTheSituation() {
+        game.things = Arrays.asList("cretin", "brass lamp", "hidden key");
+        assertEquals("You're at Field. You can see the brass lamp. You can go north. "
+                        + "You could try: turn on the lamp or go north. Say how do I play to learn more commands.",
+                session.handle("help").text());
+        session.handle("turn on the lamp");
+        assertEquals("You're at Field. You can see the brass lamp. You can go north. "
+                        + "You could try: examine the lamp or go north. Say how do I play to learn more commands.",
+                session.handle("what can I do").text());
+    }
+
+    @Test
+    public void nudgesTowardHelpAfterTwoRejections() {
+        assertFalse(session.handle("frobnicate").text().contains(CommandSession.STUCK_NOTE));
+        assertTrue(session.handle("frobnicate").text().contains(CommandSession.STUCK_NOTE));
+        assertFalse(session.handle("frobnicate").text().contains(CommandSession.STUCK_NOTE));
+    }
+
+    @Test
+    public void speechFixesMisheardGameWords() {
+        session.handle("open the box");
+        CommandSession.Result result = session.handleSpeech(Arrays.asList("reed the leaf lit"));
+        assertEquals("read the leaflet", result.heard);
+        assertEquals("read the leaflet", game.sent.get(game.sent.size() - 1));
+        session.handleSpeech(Arrays.asList("go nor"));
+        assertEquals("Path", game.room);
+    }
+
+    @Test
+    public void speechPrefersAnAlternativeTheGameKnows() {
+        session.handleSpeech(Arrays.asList("take the lump zz", "take the lamp"));
+        assertEquals("take the lamp", game.sent.get(0));
+    }
+
+    @Test
+    public void speechSaysWhatItHeardWhenRejected() {
+        CommandSession.Result result = session.handleSpeech(Arrays.asList("frobnicate"));
+        assertTrue(result.rejected);
+        assertTrue(result.text().contains("I heard: frobnicate."));
+    }
+
+    @Test
+    public void speechRecognizesHelpAmongAlternatives() {
+        CommandSession.Result result = session.handleSpeech(Arrays.asList("kelp me out", "help"));
+        assertTrue(result.text().startsWith("You're at Field."));
+        assertTrue(game.sent.isEmpty());
+    }
+
+    @Test
+    public void hintGivesWalkthroughHintsOnceLoaded() {
         session.setHintsLoading(true);
-        assertEquals(CommandSession.HINTS_LOADING, session.handle("help").text());
-        assertEquals(CommandSession.HELP_TEXT + CommandSession.HINTS_NOTE, session.handle("commands").text());
+        assertEquals(CommandSession.HINTS_LOADING, session.handle("hint").text());
 
         game.state = new int[] {0};
         session.setHintAdvisor(new HintAdvisor(new WalkthroughIndex(java.util.Arrays.asList(
                 new WalkthroughIndex.Step("n", "Field", "Path", new int[0], new int[0]),
                 new WalkthroughIndex.Step("open box", "Path", null, new int[] {0}, new int[] {1})))));
-        assertEquals("Your next step is somewhere else, at Path. Say help again for directions.",
-                session.handle("help").text());
-        assertEquals("From here, go north. Say help again to hear what to do there.",
+        assertEquals("Your next step is somewhere else, at Path. Say hint again for directions.",
+                session.handle("help me").text());
+        assertEquals("From here, go north. Say hint again to hear what to do there.",
                 session.handle("hint").text());
         session.handle("n");
         assertEquals("Try: open box.", session.handle("I'm stuck").text());
-        assertEquals(CommandSession.HELP_TEXT + CommandSession.HINTS_NOTE, session.handle("how do I play").text());
+        assertEquals(CommandSession.HELP_TEXT, session.handle("how do I play").text());
         assertEquals(Arrays.asList("n"), game.sent);
     }
 

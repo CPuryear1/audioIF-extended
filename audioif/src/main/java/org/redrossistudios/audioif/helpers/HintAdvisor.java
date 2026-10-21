@@ -20,7 +20,7 @@ import java.util.Set;
 public final class HintAdvisor {
 
     static final String ALL_DONE = "You've done everything I know about. Say score to see how you're doing.";
-    static final String MORE = " Say help again for a bigger hint.";
+    static final String MORE = " Say hint again for a bigger hint.";
 
     private static final int MAX_ROUTE = 12;
     private static final Map<String, String> DIRECTION_WORDS = new HashMap<>();
@@ -120,7 +120,7 @@ public final class HintAdvisor {
                 case 0:
                     return "There's something to do right here. Look around and examine what you see." + MORE;
                 case 1:
-                    return thingsHint(goal.command) + " Say help again to hear exactly what to do.";
+                    return thingsHint(goal.command) + " Say hint again to hear exactly what to do.";
                 default:
                     return "Try: " + goal.command + ".";
             }
@@ -128,12 +128,34 @@ public final class HintAdvisor {
         String place = roomName(goal.room);
         switch (shown) {
             case 0:
-                return "Your next step is somewhere else, at " + place + "." + " Say help again for directions.";
+                return "Your next step is somewhere else, at " + place + "." + " Say hint again for directions.";
             case 1:
-                return directions(at, goal.room, knownExits) + " Say help again to hear what to do there.";
+                return directions(at, goal.room, knownExits) + " Say hint again to hear what to do there.";
             default:
                 return "At " + place + ", try: " + goal.command + ". " + directions(at, goal.room, knownExits);
         }
+    }
+
+    /**
+     * The directions the walkthrough replay found leading out of a room ("N", "U", "IN"...),
+     * for a room id from {@link #roomId}. Empty if the replay never mapped the room.
+     */
+    public synchronized List<String> exitsFrom(String roomId) {
+        List<String> found = new ArrayList<>();
+        for (Map<String, Map<String, String>> map : Arrays.asList(reverseExits, walkthroughExits)) {
+            Map<String, String> exits = roomId == null ? null : map.get(roomId);
+            if (exits == null) {
+                continue;
+            }
+            for (String key : exits.keySet()) {
+                String word = DIRECTION_WORDS.get(key);
+                String abbreviation = word == null ? null : key(word);
+                if (abbreviation != null && !found.contains(abbreviation)) {
+                    found.add(abbreviation);
+                }
+            }
+        }
+        return found;
     }
 
     /**

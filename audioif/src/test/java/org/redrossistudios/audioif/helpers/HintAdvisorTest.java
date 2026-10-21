@@ -32,7 +32,7 @@ public class HintAdvisorTest {
         int[] state = {0, 0};
         assertEquals("There's something to do right here. Look around and examine what you see."
                 + HintAdvisor.MORE, advisor.hint(state, "Path", null));
-        assertEquals("Try doing something with the box. Say help again to hear exactly what to do.",
+        assertEquals("Try doing something with the box. Say hint again to hear exactly what to do.",
                 advisor.hint(state, "Path", null));
         assertEquals("Try: open box.", advisor.hint(state, "Path", null));
         assertEquals("Try: open box.", advisor.hint(state, "Path", null));
@@ -41,9 +41,9 @@ public class HintAdvisorTest {
     @Test
     public void hintsGiveDirectionsFromElsewhere() {
         int[] state = {0, 0};
-        assertEquals("Your next step is somewhere else, at Path. Say help again for directions.",
+        assertEquals("Your next step is somewhere else, at Path. Say hint again for directions.",
                 advisor.hint(state, "Field", null));
-        assertEquals("From here, go north. Say help again to hear what to do there.",
+        assertEquals("From here, go north. Say hint again to hear what to do there.",
                 advisor.hint(state, "Field", null));
         assertEquals("At Path, try: open box. From here, go north.", advisor.hint(state, "Field", null));
     }
@@ -52,9 +52,9 @@ public class HintAdvisorTest {
     public void nextGoalStartsVagueAgain() {
         advisor.hint(new int[] {0, 0}, "Path", null);
         advisor.hint(new int[] {0, 0}, "Path", null);
-        assertEquals("Your next step is somewhere else, at Hut. Say help again for directions.",
+        assertEquals("Your next step is somewhere else, at Hut. Say hint again for directions.",
                 advisor.hint(new int[] {1, 0}, "Path", null));
-        assertEquals("From here, go east. Say help again to hear what to do there.",
+        assertEquals("From here, go east. Say hint again to hear what to do there.",
                 advisor.hint(new int[] {1, 0}, "Path", null));
     }
 
@@ -66,18 +66,18 @@ public class HintAdvisorTest {
         known.put("Path", new HashMap<>());
         known.get("Path").put("E", "Hut");
         advisor.hint(new int[] {1, 0}, "Field", known);
-        assertEquals("You've been there: say go to Hut. Say help again to hear what to do there.",
+        assertEquals("You've been there: say go to Hut. Say hint again to hear what to do there.",
                 advisor.hint(new int[] {1, 0}, "Field", known));
     }
 
     @Test
     public void longerRoutesAndUnknownWays() {
         advisor.hint(new int[] {1, 0}, "Field", null);
-        assertEquals("From here, go north, then east. Say help again to hear what to do there.",
+        assertEquals("From here, go north, then east. Say hint again to hear what to do there.",
                 advisor.hint(new int[] {1, 0}, "Field", null));
         HintAdvisor lost = new HintAdvisor(index());
         lost.hint(new int[] {1, 0}, "Cellar", null);
-        assertEquals("I don't know the way from here. Try to retrace your steps. Say help again to hear what to do there.",
+        assertEquals("I don't know the way from here. Try to retrace your steps. Say hint again to hear what to do there.",
                 lost.hint(new int[] {1, 0}, "Cellar", null));
     }
 
@@ -90,11 +90,11 @@ public class HintAdvisorTest {
                 new WalkthroughIndex.Step("open box", "Field", null, new int[] {0}, new int[] {1})));
         HintAdvisor fromPath = new HintAdvisor(index);
         fromPath.hint(new int[] {0, 1}, "Path", null);
-        assertEquals("From here, go south. Say help again to hear what to do there.",
+        assertEquals("From here, go south. Say hint again to hear what to do there.",
                 fromPath.hint(new int[] {0, 1}, "Path", null));
         HintAdvisor fromHut = new HintAdvisor(index);
         fromHut.hint(new int[] {0, 1}, "Hut", null);
-        assertEquals("I don't know the way from here. Try to retrace your steps. Say help again to hear what to do there.",
+        assertEquals("I don't know the way from here. Try to retrace your steps. Say hint again to hear what to do there.",
                 fromHut.hint(new int[] {0, 1}, "Hut", null));
     }
 
@@ -111,7 +111,7 @@ public class HintAdvisorTest {
                 exits).serialize());
         HintAdvisor advisor = new HintAdvisor(index);
         advisor.hint(new int[] {0, 1}, "Hut", null);
-        assertEquals("From here, go southwest. Say help again to hear what to do there.",
+        assertEquals("From here, go southwest. Say hint again to hear what to do there.",
                 advisor.hint(new int[] {0, 1}, "Hut", null));
     }
 

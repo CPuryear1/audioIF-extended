@@ -19,6 +19,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -88,7 +89,10 @@ public class PlayHarness {
         for (String typed : commands) {
             Turn turn = new Turn();
             turn.typed = typed;
-            turn.result = session.handle(typed);
+            // "~ nor | north" simulates speech: the recognizer's alternatives, best first.
+            turn.result = typed.startsWith("~")
+                    ? session.handleSpeech(Arrays.asList(typed.substring(1).split("\\|")))
+                    : session.handle(typed);
             turns.add(turn);
         }
 
@@ -136,6 +140,9 @@ public class PlayHarness {
             Turn t = turns.get(i);
             List<String> sent = t.result.sentCommands();
             sb.append("## ").append(i + 1).append(". > ").append(t.typed);
+            if (t.result.heard != null) {
+                sb.append("  [heard: ").append(t.result.heard).append("]");
+            }
             if (!(sent.size() == 1 && sent.get(0).trim().equalsIgnoreCase(t.typed.trim()))) {
                 sb.append("  [sent: ").append(String.join("; ", sent)).append("]");
             }

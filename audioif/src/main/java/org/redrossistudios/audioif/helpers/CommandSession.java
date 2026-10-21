@@ -38,6 +38,11 @@ public final class CommandSession {
         /** The current room from the status line, or null if unknown. */
         String currentRoom();
 
+        /** Names of the objects in the current room (scenery included, hidden ones too), or empty if unknown. */
+        default List<String> thingsHere() {
+            return Collections.emptyList();
+        }
+
         /** Puzzle-relevant game state (see {@link GameStateReader}), or null if unsupported. */
         default int[] stateVector() {
             return null;
@@ -72,6 +77,8 @@ public final class CommandSession {
         public boolean rejected;
         /** Suggestions offered for a numbered choice, empty if none. */
         public List<String> suggestions = Collections.emptyList();
+        /** For speech, the words the app went with after matching them to the game; else null. */
+        public String heard;
 
         public List<String> sentCommands() {
             List<String> sent = new ArrayList<>();
@@ -106,17 +113,27 @@ public final class CommandSession {
 
     public static final String ASK_AGAIN = "OK, what would you like to do?";
 
-    static final String HELP_TEXT = "Say or type short commands, for example: look, inventory, "
-            + "go north, take the lamp, open the mailbox, read the leaflet. "
-            + "You can chain them: open the mailbox and take the leaflet. "
-            + "Say go back to retrace your last step, keep going to continue the same way, "
-            + "or go to a place you have already visited, such as go to the kitchen. "
-            + "Say again to repeat a command, undo to take back your last turn, "
-            + "and save or restore to keep your progress.";
+    /** Spoken once when a new game starts, for players who haven't met a text adventure before. */
+    public static final String WELCOME_TIP = "Tip: tell the game what to do in a few words, "
+            + "like open the mailbox, take the lamp, or go north. "
+            + "Say help at any time to hear what you could do here.";
+
+    static final String HELP_TEXT = "This is a text adventure. You play by telling the game what to do, "
+            + "usually a verb and a thing, like open the mailbox. "
+            + "To move, say a direction: north, south, east, west, up, down, in or out. "
+            + "Say look to hear where you are, and examine something to look at it closely. "
+            + "Other useful verbs are take, drop, open, close, read, turn on, put something in something, "
+            + "and attack something with a weapon. Say inventory to hear what you're carrying. "
+            + "You can chain commands: open the mailbox and take the leaflet. "
+            + "Say go back to retrace a step, or go to a place you've visited, like go to the kitchen. "
+            + "Say undo to take back a turn, and save or restore to keep your progress. "
+            + "Say help at any time to hear what you could do here.";
 
     static final String HINT_TEXT = "This game has no built-in hints. Try examining everything "
             + "you find, reading anything with writing on it, opening containers, "
-            + "and trying every exit. Say help for a list of commands.";
+            + "and trying every exit. Say help to hear what you could do here.";
+
+    static final String STUCK_NOTE = "Not sure what to say? Say help to hear what you could do here.";
 
     static final String QUESTION_NOTE = "The game can't answer questions. Try look, "
             + "examine something, or inventory.";
@@ -129,19 +146,20 @@ public final class CommandSession {
     private static final int MAX_WALK = 25;
 
     static final String HINTS_LOADING = "Hints for this game are still loading. Ask again in a moment, "
-            + "or say commands for a list of commands.";
+            + "or say help to hear what you could do here.";
 
-    static final String HINTS_NOTE = " Say help or hint for advice on what to do next.";
-
-    // "help" asks for a hint when the game has a walkthrough, else for the command list.
-    private static final Set<String> HELP_OR_HINT_PHRASES = canonicalSet("help", "help me");
-    private static final Set<String> HELP_PHRASES = canonicalSet("commands",
-            "what can i do", "what can i say", "how do i play", "instructions", "list the commands",
-            "what are the commands", "list commands", "command list");
+    // "help" describes the situation; "how do I play" explains commands; "hint" uses the walkthrough.
+    private static final Set<String> SITUATION_PHRASES = canonicalSet("help", "what can i do",
+            "what can i do here", "what are my options", "options", "ideas", "give me ideas",
+            "what can i try", "what should i try", "suggestions", "suggest something");
+    private static final Set<String> HELP_PHRASES = canonicalSet("commands", "more help", "help with commands",
+            "what can i say", "how do i play", "how to play", "how does this work", "instructions",
+            "list the commands", "what are the commands", "list commands", "command list", "verbs",
+            "what verbs", "tutorial");
     private static final Set<String> HINT_PHRASES = canonicalSet("hint", "hints", "give me a hint",
             "i need a hint", "i am stuck", "clue", "give me a clue", "any hints", "what should i do",
             "what do i do", "what now", "now what", "what next", "what do i do next", "what should i do next",
-            "i do not know what to do");
+            "i do not know what to do", "help me", "i need help");
     private static final Set<String> UNDO_PHRASES = canonicalSet("undo", "undo that", "undo the last move",
             "undo last move", "undo the last turn", "take that back", "take back", "oops undo");
     private static final Set<String> BACK_PHRASES = canonicalSet("go back", "back", "return", "go back the way i came",
@@ -159,7 +177,7 @@ public final class CommandSession {
             "exits", "list the exits", "show the exits", "what directions can i go", "which directions",
             "which directions can i go", "which way", "which way now", "where to", "where does it go",
             "are there any exits", "what exits", "what are the ways out", "how do i get out",
-            "how do i leave", "where are the exits", "what way can i go", "what are my options");
+            "how do i leave", "where are the exits", "what way can i go");
     private static final Set<String> CHATTER_STARTERS = set("i", "it", "that", "this", "because", "since",
             "cause", "which", "maybe", "hopefully", "probably", "you");
     private static final Set<String> NO_STATE_COMMANDS = set("look", "l", "i", "inventory", "score",
@@ -253,6 +271,11 @@ public final class CommandSession {
     // Exits in the map that are only guessed as the opposite of a move ("room\tdirection").
     private final Set<String> guessedExits = new HashSet<>();
     private final Set<String> vocabulary = new LinkedHashSet<>();
+    // Words the game has printed that its parser also knows: what a misheard word may have meant.
+    private final Set<String> seenGameWords = new LinkedHashSet<>();
+    // Every command sent, so help suggests things the player hasn't tried yet.
+    private final Set<String> triedCommands = new HashSet<>();
+    private int rejectedInARow;
     private String room;
     private Move lastMove;
     private String lastNoun;
@@ -330,13 +353,15 @@ public final class CommandSession {
         }
 
         String canonical = CommandNormalizer.canonicalize(text);
-        boolean hintsOffered = hints != null || hintsLoading;
-        boolean helpOrHint = HELP_OR_HINT_PHRASES.contains(canonical) && !game.contains("help");
-        if (helpOrHint && !hintsOffered || HELP_PHRASES.contains(canonical) && !game.contains("help")) {
-            result.note(hintsOffered ? HELP_TEXT + HINTS_NOTE : HELP_TEXT);
+        if (SITUATION_PHRASES.contains(canonical) && !(canonical.equals("help") && game.contains("help"))) {
+            result.note(situation());
             return result;
         }
-        if (helpOrHint || HINT_PHRASES.contains(canonical) && !game.contains("hint")) {
+        if (HELP_PHRASES.contains(canonical) && !game.contains("help")) {
+            result.note(HELP_TEXT);
+            return result;
+        }
+        if (HINT_PHRASES.contains(canonical) && !game.contains("hint")) {
             result.note(hint());
             return result;
         }
@@ -367,6 +392,10 @@ public final class CommandSession {
         }
         if (!changed && snapshot) {
             undo.pop();
+        }
+        rejectedInARow = result.rejected ? rejectedInARow + 1 : 0;
+        if (rejectedInARow == 2) {
+            result.note(STUCK_NOTE);
         }
         return result;
     }
@@ -599,6 +628,7 @@ public final class CommandSession {
         result.exchanges.add(new Exchange(command, response, null));
         learnVocabulary(response);
         String lowerCommand = command.toLowerCase(Locale.ROOT).trim();
+        triedCommands.add(bareCommand(lowerCommand));
         String direction = moveKey(lowerCommand);
         String status = game.currentRoom();
         String after = status != null ? status : roomFromResponse(response, direction != null);
@@ -926,6 +956,358 @@ public final class CommandSession {
         return hintsLoading ? HINTS_LOADING : HINT_TEXT;
     }
 
+    /**
+     * Handles speech: picks the recognizer alternative that fits the game best, fixes
+     * misheard game words (see {@link SpeechMatcher}), and runs it. If the game rejects
+     * it, the reply also says what was heard, so the player can tell a mishearing apart
+     * from a command the game doesn't understand.
+     */
+    public Result handleSpeech(List<String> alternatives) {
+        List<String> heard = new ArrayList<>();
+        if (alternatives != null) {
+            for (String alternative : alternatives) {
+                if (alternative != null && !alternative.trim().isEmpty()) {
+                    heard.add(alternative);
+                }
+            }
+        }
+        if (pending != null) {
+            for (String alternative : heard) {
+                int choice = CommandSuggester.parseChoice(alternative);
+                if (choice >= 1 && choice <= pending.size() + 1
+                        || CommandNormalizer.canonicalize(alternative).equals("something else")) {
+                    return handle(alternative);
+                }
+            }
+        }
+        for (String alternative : heard) {
+            String canonical = CommandNormalizer.canonicalize(alternative);
+            if (SITUATION_PHRASES.contains(canonical) || HELP_PHRASES.contains(canonical)
+                    || HINT_PHRASES.contains(canonical) || UNDO_PHRASES.contains(canonical)) {
+                return handle(alternative);
+            }
+        }
+        String chosen = SpeechMatcher.choose(heard, speechVocabulary());
+        Result result = handle(chosen);
+        result.heard = chosen;
+        if (result.rejected && !chosen.isEmpty()) {
+            int at = result.exchanges.size();
+            for (int i = 0; i < result.exchanges.size(); i++) {
+                if (result.exchanges.get(i).command == null) {
+                    at = i;
+                    break;
+                }
+            }
+            result.exchanges.add(at, new Exchange(null, null, "I heard: " + chosen + "."));
+        }
+        return result;
+    }
+
+    /** Words worth telling the speech recognizer to expect: directions, verbs and things seen in the game. */
+    public List<String> speechHints() {
+        Set<String> words = new LinkedHashSet<>(Arrays.asList("north", "south", "east", "west", "northeast",
+                "northwest", "southeast", "southwest", "up", "down", "look", "inventory", "examine", "help",
+                "hint", "undo"));
+        for (String verb : COMMON_VERBS) {
+            if (game.contains(verb)) {
+                words.add(verb);
+            }
+        }
+        for (String thing : visibleThings()) {
+            words.add(thing.toLowerCase(Locale.ROOT));
+        }
+        for (String word : recentVocabulary()) {
+            if (seenGameWords.contains(word)) {
+                words.add(word);
+            }
+        }
+        List<String> hints = new ArrayList<>(words);
+        return hints.size() > 100 ? new ArrayList<>(hints.subList(0, 100)) : hints;
+    }
+
+    private SpeechMatcher.Vocabulary speechVocabulary() {
+        final Set<String> candidates = new LinkedHashSet<>(seenGameWords);
+        for (String word : Arrays.asList("north", "south", "east", "west", "northeast", "northwest",
+                "southeast", "southwest", "inventory", "examine", "look")) {
+            if (game.contains(word)) {
+                candidates.add(word);
+            }
+        }
+        for (String verb : COMMON_VERBS) {
+            if (game.contains(verb)) {
+                candidates.add(verb);
+            }
+        }
+        candidates.addAll(Arrays.asList("help", "hint", "undo"));
+        return new SpeechMatcher.Vocabulary() {
+            @Override
+            public boolean knows(String word) {
+                return appWords().contains(word) || game.contains(word);
+            }
+
+            @Override
+            public java.util.Collection<String> candidates() {
+                return candidates;
+            }
+        };
+    }
+
+    private static Set<String> appWords;
+
+    // Words the app itself understands, so speech matching never "corrects" them.
+    private static synchronized Set<String> appWords() {
+        if (appWords == null) {
+            Set<String> words = new HashSet<>(CommandNormalizer.knownWords());
+            for (Set<String> phrases : Arrays.asList(SITUATION_PHRASES, HELP_PHRASES, HINT_PHRASES, UNDO_PHRASES,
+                    BACK_PHRASES, CONTINUE_PHRASES, EXIT_QUESTIONS, VERB_STARTERS, LANDMARK_VERBS)) {
+                for (String phrase : phrases) {
+                    words.addAll(Arrays.asList(phrase.split(" ")));
+                }
+            }
+            words.addAll(Arrays.asList("one", "two", "three", "four", "five", "something", "else", "twice",
+                    "times", "help", "hint", "undo", "again", "restart", "save", "restore", "quit", "yes", "no"));
+            appWords = words;
+        }
+        return appWords;
+    }
+
+    private static final List<String> COMMON_VERBS = Arrays.asList("take", "drop", "open", "close", "read",
+            "examine", "look", "move", "push", "pull", "turn", "light", "put", "give", "attack", "kill", "climb",
+            "enter", "unlock", "tie", "wait", "inventory", "wear", "eat", "drink", "throw", "listen");
+    private static final List<String> DIRECTION_ORDER = Arrays.asList("N", "NE", "E", "SE", "S", "SW", "W",
+            "NW", "U", "D", "IN", "OUT");
+    private static final Pattern MENTIONED_DIRECTION = Pattern.compile(
+            "\\b(north(?:east|west)?|south(?:east|west)?|east|west)\\b"
+                    + "(?!\\s+(?:of(?!\\s+here)|side|wall|walls|end|edge|bank|shore|part|half|corner|face)\\b)");
+    private static final Pattern MENTIONED_UP_DOWN = Pattern.compile(
+            "\\b(?:leads?|leading|goes|going|heads?|winds?|winding|climbs?|stairs?|staircase|stairway|ladder|"
+                    + "steps|chimney|passage|path|tunnel)\\s+(?:\\w+\\s+)?(up|down)(?:ward|wards)?\\b");
+    private static final Set<String> NOT_THINGS = set("you", "yourself", "me", "cretin", "adventurer",
+            "player", "it", "ground", "floor", "sky", "air");
+    private static final Pattern NOT_SEEN = Pattern.compile(
+            "(?i)can't see|cannot see|don't see|do not see|don't know the word|isn't one i recognize");
+    private static final Set<String> READ_THINGS = set("leaflet", "book", "note", "paper", "sign", "label",
+            "inscription", "guidebook", "map", "letter", "scroll", "pamphlet", "manual", "card", "engravings",
+            "prayer", "newspaper", "advertisement", "tome", "plaque", "matchbook", "brochure", "parchment");
+    private static final Set<String> OPEN_THINGS = set("mailbox", "box", "door", "window", "case", "chest",
+            "sack", "bag", "bottle", "lid", "coffin", "cabinet", "drawer", "gate", "grate", "grating", "trapdoor",
+            "jar", "tube", "crate", "basket", "buoy", "egg", "hatch", "cupboard", "trunk", "container");
+    private static final Set<String> LIGHT_THINGS = set("lamp", "lantern", "torch", "flashlight");
+    private static final Set<String> MOVE_THINGS = set("rug", "carpet", "mat", "rock", "boulder", "leaves");
+    private static final Set<String> CLIMB_THINGS = set("tree", "ladder", "stairs", "staircase", "rope",
+            "cliff", "chimney");
+
+    /**
+     * Answers "help": where the player is, what they can see, the ways out, and two or three
+     * concrete commands to try, chosen from things they haven't tried yet.
+     */
+    String situation() {
+        StringBuilder text = new StringBuilder();
+        if (room != null) {
+            text.append("You're at ").append(room).append(". ");
+        }
+        List<String> things = visibleThings();
+        if (!things.isEmpty()) {
+            List<String> named = new ArrayList<>();
+            for (String thing : things) {
+                named.add("the " + thing);
+            }
+            text.append("You can see ").append(spokenList(named, "and")).append(". ");
+        }
+        List<String> exits = exitsHere();
+        List<String> exitWords = new ArrayList<>();
+        for (String exit : exits) {
+            exitWords.add(spokenDirection(exit));
+        }
+        if (!exitWords.isEmpty()) {
+            text.append("You can go ").append(spokenList(exitWords, "or")).append(". ");
+        }
+        List<String> tries = new ArrayList<>();
+        for (String thing : things) {
+            String command = commandFor(thing);
+            if (command != null) {
+                tries.add(command);
+            }
+            if (tries.size() == 2) {
+                break;
+            }
+        }
+        String move = untriedExit(exits);
+        if (move != null) {
+            tries.add("go " + spokenDirection(move));
+        }
+        if (tries.isEmpty()) {
+            tries.add("look");
+            tries.add("inventory");
+        }
+        text.append("You could try: ").append(spokenList(tries, "or")).append(". ");
+        if (hints != null) {
+            text.append("Say hint if you're stuck, or how do I play to learn more commands.");
+        } else {
+            text.append("Say how do I play to learn more commands.");
+        }
+        return text.toString().trim();
+    }
+
+    // Names of things in the room that the game has mentioned, so hidden objects stay hidden.
+    private List<String> visibleThings() {
+        StringBuilder seen = new StringBuilder();
+        for (String response : recentResponses) {
+            // "You can't see any leaflet here!" doesn't make the leaflet visible.
+            if (response != null && !NOT_SEEN.matcher(response).find()) {
+                seen.append(' ').append(response);
+            }
+        }
+        if (roomDescription != null) {
+            seen.append(' ').append(roomDescription);
+        }
+        String recent = " " + seen.toString().toLowerCase(Locale.ROOT).replaceAll("[^a-z]+", " ") + " ";
+        List<String> visible = new ArrayList<>();
+        Set<String> nouns = new HashSet<>();
+        for (String name : game.thingsHere()) {
+            String clean = name == null ? "" : name.toLowerCase(Locale.ROOT).replaceAll("[^a-z ]+", " ").trim();
+            if (clean.isEmpty() || room != null && clean.equalsIgnoreCase(room)) {
+                continue;
+            }
+            String noun = nounOf(clean);
+            if (noun == null || NOT_THINGS.contains(noun) || DIRECTION_ABBREVIATION.containsKey(noun)
+                    || !recent.contains(" " + noun + " ") || !nouns.add(noun)) {
+                continue;
+            }
+            visible.add(clean);
+            if (visible.size() == 5) {
+                break;
+            }
+        }
+        // Scenery such as Zork's window and rug isn't in the room's object tree, so also take
+        // things the room description mentions that have an obvious action.
+        if (roomDescription != null) {
+            for (String word : roomDescription.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+                if (visible.size() >= 5) {
+                    break;
+                }
+                if ((OPEN_THINGS.contains(word) || READ_THINGS.contains(word) || MOVE_THINGS.contains(word)
+                        || CLIMB_THINGS.contains(word) || LIGHT_THINGS.contains(word))
+                        && game.contains(word) && nouns.add(word)) {
+                    visible.add(word);
+                }
+            }
+        }
+        return visible;
+    }
+
+    // "pile of leaves" -> "leaves"; "brass lantern" -> "lantern".
+    private static String nounOf(String name) {
+        String[] words = name.split(" ");
+        for (int i = words.length - 1; i >= 0; i--) {
+            if (words[i].length() >= 2) {
+                return words[i];
+            }
+        }
+        return null;
+    }
+
+    private String commandFor(String thing) {
+        String noun = nounOf(thing);
+        List<String> options = new ArrayList<>();
+        if (READ_THINGS.contains(noun)) {
+            options.add("read");
+        }
+        if (OPEN_THINGS.contains(noun)) {
+            options.add("open");
+        }
+        if (LIGHT_THINGS.contains(noun)) {
+            options.add("turn on");
+        }
+        if (MOVE_THINGS.contains(noun)) {
+            options.add("move");
+        }
+        if (CLIMB_THINGS.contains(noun)) {
+            options.add("climb");
+        }
+        options.add(game.contains("examine") || !game.contains("x") ? "examine" : "x");
+        options.add("take");
+        for (String verb : options) {
+            String command = verb + " the " + noun;
+            if (!game.contains(verb.split(" ")[0]) || tried(command)) {
+                continue;
+            }
+            return command;
+        }
+        return null;
+    }
+
+    private boolean tried(String command) {
+        return triedCommands.contains(bareCommand(command));
+    }
+
+    // "x the lamp" and "examine lamp" count as the same command.
+    private static String bareCommand(String command) {
+        return command.toLowerCase(Locale.ROOT).trim().replace(" the ", " ").replaceFirst("^x ", "examine ");
+    }
+
+    // Prefers a way the player hasn't taken from this room yet.
+    private String untriedExit(List<String> exits) {
+        Map<String, String> used = room == null ? null : map.get(room);
+        for (String exit : exits) {
+            if (used == null || !used.containsKey(exit) || guessedExits.contains(room + "\t" + exit)) {
+                return exit;
+            }
+        }
+        return exits.isEmpty() ? null : exits.get(0);
+    }
+
+    // Exits from the walkthrough map when there is one, plus ways the player has used, plus
+    // directions the room description mentions.
+    private List<String> exitsHere() {
+        Set<String> found = new HashSet<>();
+        HintAdvisor advisor = hints;
+        int[] state = advisor == null ? null : game.stateVector();
+        boolean mapped = false;
+        if (state != null) {
+            List<String> known = advisor.exitsFrom(HintAdvisor.roomId(room, state));
+            found.addAll(known);
+            mapped = !known.isEmpty();
+        }
+        Map<String, String> used = room == null ? null : map.get(room);
+        if (used != null) {
+            for (String key : used.keySet()) {
+                if (DIRECTION_ORDER.contains(key) && !guessedExits.contains(room + "\t" + key)) {
+                    found.add(key);
+                }
+            }
+        }
+        if (!mapped && roomDescription != null) {
+            String description = roomDescription.toLowerCase(Locale.ROOT);
+            Matcher compass = MENTIONED_DIRECTION.matcher(description);
+            while (compass.find()) {
+                String key = DIRECTION_ABBREVIATION.get(compass.group(1));
+                if (key != null) {
+                    found.add(key);
+                }
+            }
+            Matcher upDown = MENTIONED_UP_DOWN.matcher(description);
+            while (upDown.find()) {
+                found.add(upDown.group(1).equals("up") ? "U" : "D");
+            }
+        }
+        List<String> ordered = new ArrayList<>();
+        for (String key : DIRECTION_ORDER) {
+            if (found.contains(key)) {
+                ordered.add(key);
+            }
+        }
+        return ordered;
+    }
+
+    private static String spokenList(List<String> items, String conjunction) {
+        if (items.size() <= 1) {
+            return items.isEmpty() ? "" : items.get(0);
+        }
+        return String.join(", ", items.subList(0, items.size() - 1)) + " " + conjunction + " "
+                + items.get(items.size() - 1);
+    }
+
     private List<String> route(String from, String to) {
         if (from == null) {
             return null;
@@ -1047,7 +1429,9 @@ public final class CommandSession {
         }
         for (String word : response.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
             if (word.length() >= 3) {
-                vocabulary.add(word);
+                if (vocabulary.add(word) && game.contains(word)) {
+                    seenGameWords.add(word);
+                }
             }
         }
     }

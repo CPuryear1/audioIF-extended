@@ -139,6 +139,7 @@ public class TextModeActivity extends AppCompatActivity {
             } else {
                 storyField.append(initialText);
                 session.start(initialText);
+                appendNote(CommandSession.WELCOME_TIP);
             }
 
         } catch (Exception ex) {

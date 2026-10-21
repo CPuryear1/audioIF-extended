@@ -11,6 +11,7 @@ import org.zmpp.windowing.AnnotatedText;
 import org.zmpp.windowing.BufferedScreenModel;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -76,6 +77,46 @@ public final class ZGame implements CommandSession.Game {
     @Override
     public String currentRoom() {
         return room;
+    }
+
+    /**
+     * Short names of the objects in the player's room and one level inside them, from the
+     * object tree. The location is global 0, which is only trusted when its name matches the
+     * status line; otherwise this returns an empty list.
+     */
+    @Override
+    public List<String> thingsHere() {
+        List<String> names = new ArrayList<>();
+        try {
+            Machine machine = executionControl.getMachine();
+            int location = machine.readUnsigned16(machine.readUnsigned16(0x0C));
+            // The status line isn't shown until the first command; until then trust global 0.
+            if (location <= 0 || room != null && !room.equalsIgnoreCase(objectName(machine, location))) {
+                return names;
+            }
+            for (int child = machine.getChild(location); child != 0 && names.size() < 40;
+                    child = machine.getSibling(child)) {
+                String name = objectName(machine, child);
+                names.add(name);
+                if (PLAYER_NAMES.contains(name.toLowerCase(java.util.Locale.ROOT))) {
+                    continue; // what the player carries isn't "here"
+                }
+                for (int inner = machine.getChild(child); inner != 0 && names.size() < 40;
+                        inner = machine.getSibling(inner)) {
+                    names.add(objectName(machine, inner));
+                }
+            }
+        } catch (RuntimeException e) {
+            names.clear();
+        }
+        return names;
+    }
+
+    private static final java.util.Set<String> PLAYER_NAMES = new java.util.HashSet<>(java.util.Arrays.asList(
+            "cretin", "you", "yourself", "me", "adventurer", "player"));
+
+    private static String objectName(Machine machine, int object) {
+        return machine.decode2Zscii(machine.getPropertiesDescriptionAddress(object), 0).trim();
     }
 
     @Override
