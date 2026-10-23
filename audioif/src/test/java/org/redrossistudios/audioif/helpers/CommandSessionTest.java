@@ -107,6 +107,12 @@ public class CommandSessionTest {
         }
 
         List<String> things = new ArrayList<>();
+        List<String> carried = new ArrayList<>();
+
+        @Override
+        public List<String> carried() {
+            return carried;
+        }
 
         @Override
         public List<String> thingsHere() {
@@ -491,5 +497,126 @@ public class CommandSessionTest {
             assertFalse(suggestion, suggestion.startsWith("fry"));
         }
         assertTrue(result.suggestions.isEmpty() || result.suggestions.get(0).startsWith("try") == false);
+    }
+
+    @Test
+    public void loudRoomEchoIsExplained() {
+        game.replies.put("take the lamp", "lamp lamp ...");
+        session.handle("go north");
+        CommandSession.Result result = session.handle("take the lamp");
+        assertFalse(result.rejected);
+        assertTrue(result.text(), result.text().contains("Say echo to quiet it, or leave by saying a direction, "
+                + "like go south."));
+    }
+
+    @Test
+    public void darknessNamesTheLightYouCarry() {
+        game.replies.put("look", "It is pitch black. You are likely to be eaten by a grue.");
+        assertTrue(session.handle("look").text().contains(CommandSession.DARK_NOTE));
+        game.carried.add("brass lantern");
+        assertTrue(session.handle("look").text().contains("You're carrying the lantern, so say turn on the lantern."));
+    }
+
+    @Test
+    public void paddedDirectionsMove() {
+        session.handle("the north");
+        assertEquals("Path", game.room);
+        session.handle("no south");
+        assertEquals("Field", game.room);
+    }
+
+    @Test
+    public void findsTheCommandAtTheEndOfARambling() {
+        assertEquals("go south", CommandSession.commandInSentence(
+                "how about ghosts this is what i said go south"));
+        assertEquals("go back into the house", CommandSession.commandInSentence(
+                "no no go back into the house do not leave the house"));
+        assertEquals(null, CommandSession.commandInSentence("take the lamp"));
+        CommandSession.Result result = session.handle("how about ghosts this is what i said go north");
+        assertEquals("Path", game.room);
+        assertTrue(result.text(), result.text().contains("(I took that as: go north.)"));
+    }
+
+    @Test
+    public void climbInEntersThings() {
+        session.handle("climb in");
+        assertEquals("Shed", game.room);
+        game.words.add("enter");
+        game.words.add("window");
+        session.handle("climb in the window");
+        assertEquals("enter the window", game.sent.get(game.sent.size() - 1));
+    }
+
+    @Test
+    public void goWithARoomNameWalksThere() {
+        session.handle("go north");
+        session.handle("go east");
+        session.handle("go west");
+        session.handle("go south");
+        session.handle("go hut");
+        assertEquals("Hut", game.room);
+    }
+
+    @Test
+    public void goForwardAfterClimbingDownAsks() {
+        session.handle("go inside");
+        CommandSession.Result result = session.handle("go forward");
+        assertEquals("Shed", game.room);
+        assertTrue(result.text(), result.text().startsWith("Your last move was in."));
+    }
+
+    @Test
+    public void sideOfAPlaceIsNotADirection() {
+        session.start("Field\nYou are on the north side of a white house.");
+        CommandSession.Result result = session.handle("go to the white house");
+        assertEquals("Field", game.room);
+        assertFalse(result.text(), result.text().contains("I took that to mean go north"));
+    }
+
+    @Test
+    public void goToANearbyRoomTheWalkthroughKnows() {
+        game.state = new int[] {0};
+        session.setHintAdvisor(new HintAdvisor(new WalkthroughIndex(Arrays.asList(
+                new WalkthroughIndex.Step("n", "Field", "Path", new int[0], new int[0]),
+                new WalkthroughIndex.Step("e", "Path", "Hut", new int[0], new int[0]),
+                new WalkthroughIndex.Step("open box", "Hut", null, new int[] {0}, new int[] {1})))));
+        CommandSession.Result result = session.handle("go back to the hut");
+        assertEquals("Hut", game.room);
+        assertTrue(result.text(), result.text().contains("You walk to Hut."));
+    }
+
+    @Test
+    public void hintSkipsSurviveARestart() {
+        game.words.addAll(Arrays.asList("get", "egg"));
+        game.replies.put("take the egg", "You already have that!");
+        game.state = new int[] {0};
+        session.setHintAdvisor(new HintAdvisor(new WalkthroughIndex(Arrays.asList(
+                new WalkthroughIndex.Step("get egg", "Field", null, new int[] {0}, new int[] {1}),
+                new WalkthroughIndex.Step("open box", "Field", null, new int[] {0}, new int[] {2})))));
+        session.handle("hint");
+        session.handle("hint");
+        session.handle("hint");
+        session.handle("take the egg");
+        String saved = session.hintSkips();
+        assertEquals("0", saved);
+
+        CommandSession resumed = new CommandSession(game);
+        resumed.start("Field\nYou are in a field.");
+        resumed.restoreHintSkips(saved);
+        resumed.setHintAdvisor(new HintAdvisor(new WalkthroughIndex(Arrays.asList(
+                new WalkthroughIndex.Step("get egg", "Field", null, new int[] {0}, new int[] {1}),
+                new WalkthroughIndex.Step("open box", "Field", null, new int[] {0}, new int[] {2})))));
+        resumed.handle("hint");
+        resumed.handle("hint");
+        assertEquals("Try: open box.", resumed.handle("hint").text());
+    }
+
+    @Test
+    public void speechPrefersWordsForThingsInView() {
+        game.words.addAll(Arrays.asList("rope", "road"));
+        game.things.add("rope");
+        session.start("Field\nA large coil of rope is lying in the corner.");
+        session.handleSpeech(Arrays.asList("take the road", "take the rope"));
+        assertEquals("take the rope", game.sent.get(0));
     }
 }

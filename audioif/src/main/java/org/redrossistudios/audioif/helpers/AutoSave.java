@@ -19,6 +19,7 @@ public final class AutoSave {
 
     private final File stateFile;
     private final File recapFile;
+    private final File skipsFile;
 
     public AutoSave(File directory, String storyPath) {
         String name = new File(storyPath).getName().replaceAll("[^A-Za-z0-9]+", "_");
@@ -26,6 +27,7 @@ public final class AutoSave {
         directory.mkdirs();
         stateFile = new File(directory, key + ".qzl");
         recapFile = new File(directory, key + ".txt");
+        skipsFile = new File(directory, key + ".skips");
     }
 
     public boolean exists() {
@@ -69,6 +71,24 @@ public final class AutoSave {
     public void clear() {
         stateFile.delete();
         recapFile.delete();
+        skipsFile.delete();
+    }
+
+    /** Keeps the hint steps the player has done another way (see {@link CommandSession#hintSkips()}). */
+    public void saveHintSkips(String skips) {
+        try {
+            write(skipsFile, (skips == null ? "" : skips).getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public String loadHintSkips() {
+        try {
+            return skipsFile.isFile() ? new String(Files.readAllBytes(skipsFile.toPath()), StandardCharsets.UTF_8) : "";
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     // Writes to a temporary file first so an interrupted save never leaves a corrupt file.

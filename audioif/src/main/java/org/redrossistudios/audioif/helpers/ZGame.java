@@ -115,6 +115,32 @@ public final class ZGame implements CommandSession.Game {
     private static final java.util.Set<String> PLAYER_NAMES = new java.util.HashSet<>(java.util.Arrays.asList(
             "cretin", "you", "yourself", "me", "adventurer", "player"));
 
+    /** Short names of what the player carries, from the object tree; empty if unknown. Works in the dark. */
+    @Override
+    public List<String> carried() {
+        List<String> names = new ArrayList<>();
+        try {
+            Machine machine = executionControl.getMachine();
+            int location = machine.readUnsigned16(machine.readUnsigned16(0x0C));
+            if (location <= 0) {
+                return names;
+            }
+            for (int child = machine.getChild(location); child != 0; child = machine.getSibling(child)) {
+                if (!PLAYER_NAMES.contains(objectName(machine, child).toLowerCase(java.util.Locale.ROOT))) {
+                    continue;
+                }
+                for (int held = machine.getChild(child); held != 0 && names.size() < 40;
+                        held = machine.getSibling(held)) {
+                    names.add(objectName(machine, held));
+                }
+                break;
+            }
+        } catch (RuntimeException e) {
+            names.clear();
+        }
+        return names;
+    }
+
     private static String objectName(Machine machine, int object) {
         return machine.decode2Zscii(machine.getPropertiesDescriptionAddress(object), 0).trim();
     }

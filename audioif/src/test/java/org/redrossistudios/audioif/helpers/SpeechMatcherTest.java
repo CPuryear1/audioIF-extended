@@ -59,4 +59,24 @@ public class SpeechMatcherTest {
         assertEquals(SpeechMatcher.phoneticKey("greeting"), SpeechMatcher.phoneticKey("grating"));
         assertEquals(SpeechMatcher.phoneticKey("reed"), SpeechMatcher.phoneticKey("read"));
     }
+    @Test
+    public void prefersWordsTheGameKnowsAndThingsInView() {
+        SpeechMatcher.Vocabulary vocabulary = new SpeechMatcher.Vocabulary() {
+            @Override
+            public boolean knows(String word) {
+                return GAME.contains(word) || word.equals("road") || word.equals("rope");
+            }
+
+            @Override
+            public Collection<String> candidates() {
+                return GAME;
+            }
+
+            @Override
+            public boolean isGameWord(String word) {
+                return GAME.contains(word) || word.equals("rope");
+            }
+        };
+        assertEquals("take the rope", SpeechMatcher.choose(Arrays.asList("take the road", "take the rope"), vocabulary));
+    }
 }
