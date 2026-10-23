@@ -133,6 +133,7 @@ public class TextModeActivity extends AppCompatActivity {
             autoSave = new AutoSave(new File(getFilesDir(), "autosave"), filePath);
             if (autoSave.exists() && game.loadState(autoSave.loadState())) {
                 String recap = autoSave.loadRecap();
+                session.restoreHintSkips(autoSave.loadHintSkips());
                 storyField.append(recap);
                 appendNote(AutoSave.RESUMED_NOTE);
                 session.start(recap);
@@ -203,7 +204,11 @@ public class TextModeActivity extends AppCompatActivity {
 
     private void saveProgress() {
         if (game != null && autoSave != null) {
-            autoSave.save(game.saveState(), storyField.getText().toString());
+            byte[] state = game.saveState();
+            autoSave.save(state, storyField.getText().toString());
+            if (state != null) {
+                autoSave.saveHintSkips(session.hintSkips());
+            }
         }
     }
 

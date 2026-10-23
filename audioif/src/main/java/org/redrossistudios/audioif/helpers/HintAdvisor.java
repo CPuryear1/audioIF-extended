@@ -147,6 +147,57 @@ public final class HintAdvisor {
         return any ? route(roomId(room, state), goalRoom, walkthroughExits, reverseExits) : null;
     }
 
+    /**
+     * The walkthrough's route to the nearest room whose name has every word of {@code place}
+     * ("living room", "behind house"), if it's at most {@code maxSteps} moves away; else null.
+     * Lets "go to the living room" work before the player has been there, without walking
+     * them deep into places they haven't found.
+     */
+    public synchronized List<String> routeToRoom(String place, String room, int[] state, int maxSteps) {
+        if (place == null || room == null) {
+            return null;
+        }
+        List<String> wanted = new ArrayList<>();
+        for (String word : place.toLowerCase(Locale.ROOT).split("[^a-z]+")) {
+            if (!word.isEmpty() && !Arrays.asList("the", "a", "an", "room", "area", "place", "of").contains(word)) {
+                wanted.add(word);
+            }
+        }
+        if (wanted.isEmpty()) {
+            return null;
+        }
+        String from = roomId(room, state);
+        List<String> best = null;
+        for (Set<String> ids : idsByName.values()) {
+            for (String id : ids) {
+                List<String> name = Arrays.asList(roomName(id).toLowerCase(Locale.ROOT).split("[^a-z]+"));
+                if (id.equals(from) || !name.containsAll(wanted)) {
+                    continue;
+                }
+                List<String> path = route(from, id, walkthroughExits, reverseExits);
+                if (path != null && !path.isEmpty() && path.size() <= maxSteps
+                        && (best == null || path.size() < best.size())) {
+                    best = path;
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Goals skipped so far, to keep with the saved game. */
+    public synchronized Set<Integer> skippedGoals() {
+        return new HashSet<>(skipped);
+    }
+
+    /** Restores {@link #skippedGoals()} from a saved game; ignores numbers that aren't goals. */
+    public synchronized void restoreSkipped(java.util.Collection<Integer> goals) {
+        for (Integer goal : goals) {
+            if (goal != null && goal >= 0 && goal < index.steps.size() && index.steps.get(goal).isGoal()) {
+                skipped.add(goal);
+            }
+        }
+    }
+
     /** True if the command is the one the last hint was about ("get the egg" matches "get egg"). */
     public synchronized boolean isHintedCommand(String command) {
         return lastTarget >= 0 && plain(command).equals(plain(index.steps.get(lastTarget).command));

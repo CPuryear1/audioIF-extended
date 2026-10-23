@@ -43,6 +43,11 @@ public final class CommandSession {
             return Collections.emptyList();
         }
 
+        /** Names of what the player carries, or empty if unknown. */
+        default List<String> carried() {
+            return Collections.emptyList();
+        }
+
         /** Puzzle-relevant game state (see {@link GameStateReader}), or null if unsupported. */
         default int[] stateVector() {
             return null;
@@ -201,6 +206,32 @@ public final class CommandSession {
             "how do i leave", "where are the exits", "what way can i go");
     private static final Set<String> CHATTER_STARTERS = set("i", "it", "that", "this", "because", "since",
             "cause", "which", "maybe", "hopefully", "probably", "you");
+    // Zork's Loud Room answers every command with "bar bar ...".
+    private static final Pattern ECHO = Pattern.compile("(?s)^\\s*([a-z]+) \\1 \\.\\.\\.\\s*$",
+            Pattern.CASE_INSENSITIVE);
+    static final String ECHO_NOTE = "This room is so loud that the game only echoes your last word. "
+            + "Say echo to quiet it, or leave by saying a direction";
+    private static final Pattern DARK = Pattern.compile("(?i)pitch black|too dark to see|it is dark|it's dark");
+    static final String DARK_NOTE = "It's dark here, and moving around in the dark is dangerous. "
+            + "If you have a lamp, say turn on the lamp. Otherwise, say go back.";
+    // "the south", "no southwest", "just go north": recognizer padding before a direction.
+    private static final Pattern PADDED_DIRECTION = Pattern.compile("^(?:the|no|just|so|okay|ok|hey|they|well|"
+            + "now|and|to|um|uh|let us|lets|i will|i|we|you|joe|oh)(?: (?:go|head|walk))? (.+)$");
+    // Words after which a clause stops: "go back into the house, don't leave the house".
+    private static final Set<String> NEGATIONS = set("not", "never", "dont", "didnt", "do", "did");
+    // Words in a long sentence that don't start the command the player meant.
+    private static final Set<String> WEAK_STARTERS = set("i", "then", "also", "try", "let", "keep", "wait", "z",
+            "help", "undo", "return", "continue", "say", "answer", "count", "describe", "check", "score",
+            "save", "restore", "use", "touch", "listen", "smell", "explore");
+    private static final Set<String> LEVEL_DIRECTIONS = set("N", "S", "E", "W", "NE", "NW", "SE", "SW");
+    // "climb in", "climb in the window", "get into the boat": Zork wants "enter".
+    private static final Pattern CLIMB_IN = Pattern.compile("^(?:climb|get|crawl|step|hop|squeeze|jump|slip|"
+            + "sneak|go)(?: back)? (?:in|into|inside|through)(?: (?:the )?(.+))?$");
+    private static final Pattern BEHIND_PLACE = Pattern.compile(
+            "^(?:the )?(?:back|rear|other side|far side|backside|back side|behind)(?: side)? of (?:the )?(.+)$");
+    private static final Set<String> HOUSE_WORDS = set("house", "building", "home", "cabin", "hut", "cottage");
+    // How far "go to the living room" may walk, by the walkthrough's map, to a room not yet visited.
+    private static final int MAX_UNSEEN_WALK = 4;
     private static final Set<String> NO_STATE_COMMANDS = set("look", "l", "i", "inventory", "score",
             "diagnose", "time", "verbose", "brief", "superbrief", "help", "hint");
     private static final Set<String> NOT_MOVES = set("restore", "restart", "load", "undo", "look", "l");
@@ -233,10 +264,11 @@ public final class CommandSession {
             "you can't go that way", "you must specify", "you hit your head", "i don't know the word",
             "there was no verb", "that sentence isn't one i recogni", "you can't see any such thing",
             "i only understood you as far as", "you used the word", "where do you want to go",
-            "you'll have to say which", "you can't go there", "you can't see any");
+            "you'll have to say which", "you can't go there", "you can't see any", "you should supply");
     private static final Pattern GO_TO = Pattern.compile(
             "^(?:go|walk|head|run|travel|return|get|navigate|move|find the way|take me)"
                     + "(?: back)? (?:to|into|toward|towards) (?:the )?(.+)$");
+    private static final Pattern GO_BARE = Pattern.compile("^(?:go|walk|head|run|travel) (?:the )?(.+)$");
     private static final Pattern USE_ON = Pattern.compile("^use (?:the )?(.+?) (?:on|with|in|to open) (?:the )?(.+)$");
     private static final Pattern REPEAT = Pattern.compile("^(.+?) (twice|two times|three times|four times|five times|(\\d) times)$");
     private static final Pattern CLAUSE_SPLIT = Pattern.compile(
@@ -319,8 +351,51 @@ public final class CommandSession {
 
     /** Answers help and hint requests from a walkthrough; null for the generic answers. */
     public void setHintAdvisor(HintAdvisor advisor) {
+        if (advisor != null) {
+            synchronized (savedSkips) {
+                advisor.restoreSkipped(savedSkips);
+            }
+        }
         hints = advisor;
         hintsLoading = false;
+    }
+
+    private final Set<Integer> savedSkips = new HashSet<>();
+
+    /** Hint goals the player has done another way, as text to keep with the saved game. */
+    public String hintSkips() {
+        HintAdvisor advisor = hints;
+        Set<Integer> skips;
+        synchronized (savedSkips) {
+            skips = new java.util.TreeSet<>(savedSkips);
+        }
+        if (advisor != null) {
+            skips.addAll(advisor.skippedGoals());
+        }
+        StringBuilder text = new StringBuilder();
+        for (Integer goal : skips) {
+            text.append(text.length() == 0 ? "" : ",").append(goal);
+        }
+        return text.toString();
+    }
+
+    /** Restores {@link #hintSkips()} on resume, so a skipped hint doesn't come back. */
+    public void restoreHintSkips(String text) {
+        Set<Integer> skips = new HashSet<>();
+        for (String part : (text == null ? "" : text).split(",")) {
+            try {
+                skips.add(Integer.parseInt(part.trim()));
+            } catch (NumberFormatException ignored) {
+                // Not a goal number.
+            }
+        }
+        synchronized (savedSkips) {
+            savedSkips.addAll(skips);
+        }
+        HintAdvisor advisor = hints;
+        if (advisor != null) {
+            advisor.restoreSkipped(skips);
+        }
     }
 
     /** Call with the game's opening text so the starting room is known. */
@@ -401,15 +476,23 @@ public final class CommandSession {
             return result;
         }
 
+        Matcher padded = PADDED_DIRECTION.matcher(canonical);
+        if (padded.matches() && CommandNormalizer.direction(padded.group(1)) != null) {
+            text = padded.group(1);
+        }
+
         boolean snapshot = takeSnapshot(text);
-        List<String> clauses = splitClauses(text);
-        for (int i = 0; i < clauses.size(); i++) {
-            if (i > 0 && isChatter(clauses.get(i))) {
-                continue;
-            }
-            if (!runClause(clauses.get(i), result)) {
-                break;
-            }
+        runClauses(text, result);
+        // "how about ghosts, I said go south": a long sentence the game rejected, with a command
+        // at the end. A parser rejection doesn't use a turn, so run that command instead. Not for
+        // "frobnicate the box and go north": the player chose to chain those, so stop at the error.
+        String meant = result.rejected && result.sentCommands().size() <= 1
+                && !canonical.matches(".*\\b(?:and|then)\\b.*") ? commandInSentence(canonical) : null;
+        if (meant != null) {
+            pending = null;
+            result = new Result();
+            result.note("(I took that as: " + meant + ".)");
+            runClauses(meant, result);
         }
         // Looking around doesn't change anything, so it shouldn't use up an undo step.
         boolean changed = result.sentCommands().isEmpty();
@@ -424,6 +507,58 @@ public final class CommandSession {
             result.note(STUCK_NOTE);
         }
         return result;
+    }
+
+    private void runClauses(String text, Result result) {
+        List<String> clauses = splitClauses(text);
+        for (int i = 0; i < clauses.size(); i++) {
+            if (i > 0 && isChatter(clauses.get(i))) {
+                continue;
+            }
+            if (!runClause(clauses.get(i), result)) {
+                break;
+            }
+        }
+    }
+
+    /**
+     * The last command in a long sentence that doesn't start with one: "how about ghosts this
+     * is what I said go south" -> "go south". Stops at a negation, so "go back into the house,
+     * don't leave the house" gives "go back into the house". Null if there's no such command.
+     */
+    static String commandInSentence(String canonical) {
+        String[] words = canonical.split(" ");
+        if (words.length < 5 || VERB_STARTERS.contains(words[0]) && !WEAK_STARTERS.contains(words[0])) {
+            return null;
+        }
+        int start = -1;
+        for (int i = words.length - 1; i >= 1 && start < 0; i--) {
+            if (VERB_STARTERS.contains(words[i]) && !WEAK_STARTERS.contains(words[i])
+                    && !DIRECTION_ABBREVIATION.containsKey(words[i]) && !NEGATIONS.contains(words[i - 1])) {
+                start = i;
+            }
+        }
+        for (int i = words.length - 1; i >= 1 && start < 0; i--) {
+            if (isDirectionWord(words[i]) && !NEGATIONS.contains(words[i - 1])) {
+                start = i;
+            }
+        }
+        if (start < 0) {
+            return null;
+        }
+        int end = start + 1;
+        while (end < words.length && !NEGATIONS.contains(words[end])) {
+            end++;
+        }
+        if (end - start > 8) {
+            return null;
+        }
+        return String.join(" ", Arrays.asList(words).subList(start, end));
+    }
+
+    private static boolean isDirectionWord(String word) {
+        return word.length() > 1 && DIRECTION_ABBREVIATION.containsKey(word) && !word.equals("in")
+                && !word.equals("out");
     }
 
     // "drop the newspaper, I don't need it": a remark after a command, not a command.
@@ -489,6 +624,13 @@ public final class CommandSession {
             return runCommand(direction, result);
         }
         if (CONTINUE_PHRASES.contains(canonical) && lastMove != null && OPPOSITE.containsKey(lastMove.direction)) {
+            // Carrying on down a chasm or up a cliff is rarely what "go forward" means.
+            if (!LEVEL_DIRECTIONS.contains(lastMove.direction)) {
+                String way = spokenDirection(lastMove.direction);
+                result.note("Your last move was " + way + ". Say go " + way
+                        + " to go that way again, or name another direction.");
+                return false;
+            }
             boolean ok = true;
             for (int i = 0; i < times && ok; i++) {
                 ok = runCommand(lastMove.direction, result);
@@ -512,7 +654,32 @@ public final class CommandSession {
         }
         Matcher goTo = GO_TO.matcher(canonical);
         if (goTo.matches() && CommandNormalizer.direction(goTo.group(1)) == null) {
+            if (HOUSE_WORDS.contains(goTo.group(1)) && canonical.matches(".* (?:into|inside) .*")
+                    && game.contains("in")) {
+                // "go back into the house" from outside it: Zork's own way in.
+                String response = send("in", result);
+                if (!cantGo(response) && !isRejected(response)) {
+                    return true;
+                }
+                result.exchanges.remove(result.exchanges.size() - 1);
+            }
             return goTo(clause, goTo.group(1), result);
+        }
+        Matcher climbIn = CLIMB_IN.matcher(canonical);
+        if (climbIn.matches() && !(climbIn.group(1) != null && canonical.startsWith("go "))) {
+            String thing = climbIn.group(1);
+            if (thing == null && game.contains("in")) {
+                return runCommand("in", result);
+            }
+            if (thing != null && game.contains("enter") && !HOUSE_WORDS.contains(thing)) {
+                return runCommand("enter the " + thing, result);
+            }
+        }
+        // "go kitchen": Zork wants a direction, but the player named a room they know.
+        Matcher goBare = GO_BARE.matcher(canonical);
+        if (goBare.matches() && CommandNormalizer.direction(goBare.group(1)) == null
+                && findRoom(goBare.group(1)) != null && !findRoom(goBare.group(1)).equals(room)) {
+            return walkTo(findRoom(goBare.group(1)), result);
         }
         Matcher leave = LEAVE.matcher(canonical);
         if (leave.matches() && isCurrentPlace(leave.group(1))) {
@@ -688,6 +855,13 @@ public final class CommandSession {
             if (direction == null && (word.equals("below") || word.equals("downward") || word.equals("beneath"))) {
                 direction = "D";
             }
+            // "the north side of a white house" says where the player is, not which way to go.
+            int after = i + (i + 1 < words.size() && CommandNormalizer.DIRECTIONS.containsKey(word + " " + words.get(i + 1))
+                    ? 2 : 1);
+            if (direction != null && after < words.size() && set("side", "wall", "walls", "end", "edge", "bank",
+                    "shore", "part", "half", "corner", "face").contains(words.get(after))) {
+                direction = null;
+            }
             if (direction != null) {
                 if (found != null && !found.equals(direction)) {
                     return null;
@@ -701,6 +875,14 @@ public final class CommandSession {
     // Sends one command and handles a rejection. Returns false if rejected.
     private boolean runCommand(String command, Result result) {
         String response = send(command, result);
+        if (ECHO.matcher(response).matches()) {
+            String back = backDirection();
+            result.note(ECHO_NOTE + (back != null ? ", like go " + spokenDirection(back) + "." : "."));
+            return true;
+        }
+        if (DARK.matcher(response).find()) {
+            result.note(darkNote());
+        }
         if (retryWithNoun(command, response, result)) {
             return true;
         }
@@ -710,6 +892,20 @@ public final class CommandSession {
         result.rejected = true;
         explainRejection(command, response, result);
         return false;
+    }
+
+    // In the dark: name the light the player carries, if any.
+    private String darkNote() {
+        for (String thing : game.carried()) {
+            String lower = thing.toLowerCase(Locale.ROOT);
+            for (String word : lower.split("[^a-z]+")) {
+                if (LIGHT_THINGS.contains(word) || word.equals("candles") || word.equals("candle")) {
+                    String verb = word.startsWith("candle") ? "light" : "turn on";
+                    return "It's dark here. You're carrying the " + word + ", so say " + verb + " the " + word + ".";
+                }
+            }
+        }
+        return DARK_NOTE;
     }
 
     private String send(String command, Result result) {
@@ -990,9 +1186,15 @@ public final class CommandSession {
     }
 
     private boolean goTo(String clause, String place, Result result) {
+        Matcher behind = BEHIND_PLACE.matcher(place);
+        if (behind.matches()) {
+            place = "behind " + behind.group(1);
+        }
         // Let the game try first ("go into the house" may be a real command); parser
         // errors don't use a turn, so on failure the reply is replaced by the walk.
-        String command = CommandNormalizer.normalize(clause, game);
+        // Zork doesn't know "back" in "go back to the kitchen".
+        String command = CommandNormalizer.normalize(
+                clause.replaceFirst("(?i)\\bback (to|into|toward|towards)\\b", "$1"), game);
         String before = room;
         String response = send(command, result);
         String target = findRoom(place);
@@ -1005,6 +1207,19 @@ public final class CommandSession {
         Exchange attempt = result.exchanges.remove(result.exchanges.size() - 1);
         if (target == null) {
             int mark = result.exchanges.size();
+            // A nearby room the walkthrough knows by that name ("living room" next to the kitchen).
+            HintAdvisor advisor = hints;
+            int[] state = advisor == null ? null : game.stateVector();
+            List<String> nearby = state == null ? null : advisor.routeToRoom(place, room, state, MAX_UNSEEN_WALK);
+            if (nearby != null) {
+                for (String step : nearby) {
+                    if (!runCommand(step, result)) {
+                        return false;
+                    }
+                }
+                result.note("You walk to " + room + ".");
+                return true;
+            }
             result.exchanges.add(attempt);
             if (tryLandmark(CommandNormalizer.canonicalize(clause), result, mark)) {
                 return true;
@@ -1017,7 +1232,6 @@ public final class CommandSession {
                 return walkTo(target, result);
             }
             // The place the last hint sent the player to, by the walkthrough's route.
-            HintAdvisor advisor = hints;
             List<String> hinted = advisor == null ? null : advisor.routeToHinted(place, room, game.stateVector());
             if (hinted != null && !hinted.isEmpty()) {
                 while (result.exchanges.size() > mark) {
@@ -1251,10 +1465,24 @@ public final class CommandSession {
                 candidates.add(verb);
             }
         }
+        final Set<String> visible = new HashSet<>();
+        for (String thing : visibleThings()) {
+            visible.addAll(Arrays.asList(thing.toLowerCase(Locale.ROOT).split("[^a-z]+")));
+        }
         return new SpeechMatcher.Vocabulary() {
             @Override
             public boolean knows(String word) {
                 return appWords().contains(word) || game.contains(word);
+            }
+
+            @Override
+            public boolean isVisible(String word) {
+                return visible.contains(word) && game.contains(word);
+            }
+
+            @Override
+            public boolean isGameWord(String word) {
+                return game.contains(word);
             }
 
             @Override
@@ -1525,7 +1753,13 @@ public final class CommandSession {
                 + items.get(items.size() - 1);
     }
 
+    // Prefers exits the player has used; a guessed way back may not exist (Zork's forest).
     private List<String> route(String from, String to) {
+        List<String> sure = route(from, to, false);
+        return sure != null ? sure : route(from, to, true);
+    }
+
+    private List<String> route(String from, String to, boolean guesses) {
         if (from == null) {
             return null;
         }
@@ -1543,6 +1777,9 @@ public final class CommandSession {
                 continue;
             }
             for (Map.Entry<String, String> exit : exits.entrySet()) {
+                if (!guesses && guessedExits.contains(current + "\t" + exit.getKey())) {
+                    continue;
+                }
                 if (!paths.containsKey(exit.getValue())) {
                     List<String> path = new ArrayList<>(paths.get(current));
                     path.add(exit.getKey());

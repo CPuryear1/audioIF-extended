@@ -83,6 +83,18 @@ public class AutoSaveTest {
         assertEquals("", save.loadRecap());
     }
 
+    @Test
+    public void keepsSkippedHintsWithTheSave() throws Exception {
+        File dir = folder.newFolder("skips");
+        AutoSave save = new AutoSave(dir, "/games/Zork I.z3");
+        assertEquals("", save.loadHintSkips());
+        save.save(new byte[] {1}, "recap");
+        save.saveHintSkips("3,17");
+        assertEquals("3,17", new AutoSave(dir, "/games/Zork I.z3").loadHintSkips());
+        save.save(null, "game over");
+        assertEquals("", save.loadHintSkips());
+    }
+
     private static ZGame start(String path) throws Exception {
         MachineFactory.MachineInitStruct init = new MachineFactory.MachineInitStruct();
         init.storyFile = new FileInputStream(path);

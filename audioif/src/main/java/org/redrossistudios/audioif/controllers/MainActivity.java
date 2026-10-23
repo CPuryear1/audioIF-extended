@@ -336,6 +336,7 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
             autoSave = new AutoSave(new File(getFilesDir(), "autosave"), filePath);
             if (autoSave.exists() && game.loadState(autoSave.loadState())) {
                 String recap = autoSave.loadRecap();
+                session.restoreHintSkips(autoSave.loadHintSkips());
                 playLog.event("resumed saved game");
                 session.start(recap);
                 storyField.setText(recap);
@@ -357,7 +358,11 @@ public class MainActivity extends AppCompatActivity implements TextToSpeech.OnIn
 
     private void saveProgress() {
         if (game != null && autoSave != null) {
-            autoSave.save(game.saveState(), storyField.getText().toString());
+            byte[] state = game.saveState();
+            autoSave.save(state, storyField.getText().toString());
+            if (state != null) {
+                autoSave.saveHintSkips(session.hintSkips());
+            }
         }
     }
 

@@ -28,6 +28,20 @@ public class HintAdvisorTest {
     }
 
     @Test
+    public void routesToANearbyRoomByName() {
+        int[] state = {0, 0};
+        assertEquals(Arrays.asList("N", "E"), advisor.routeToRoom("the hut", "Field", state, 4));
+        assertEquals(null, advisor.routeToRoom("hut", "Field", state, 1));
+        assertEquals(null, advisor.routeToRoom("castle", "Field", state, 4));
+    }
+
+    @Test
+    public void restoresOnlyRealGoalsAsSkipped() {
+        advisor.restoreSkipped(Arrays.asList(1, 0, 99, -1));
+        assertEquals(new java.util.HashSet<>(Arrays.asList(1)), advisor.skippedGoals());
+    }
+
+    @Test
     public void hintsGetMorePreciseInTheRightRoom() {
         int[] state = {0, 0};
         assertEquals("There's something to do right here. Look around and examine what you see."

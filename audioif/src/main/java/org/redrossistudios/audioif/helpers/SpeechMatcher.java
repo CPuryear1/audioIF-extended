@@ -30,6 +30,16 @@ public final class SpeechMatcher {
 
         /** Game words a misheard word may be replaced with (words seen in the game, directions, verbs). */
         Collection<String> candidates();
+
+        /** True if the word names something the player can see here ("rope" in the attic). */
+        default boolean isVisible(String word) {
+            return false;
+        }
+
+        /** True if the game itself knows the word, not just the app ("rope", but not "road"). */
+        default boolean isGameWord(String word) {
+            return knows(word);
+        }
     }
 
     /** Common mishearings that sound-alike matching can't settle on its own. */
@@ -38,7 +48,10 @@ public final class SpeechMatcher {
             "the", "a", "an", "to", "with", "in", "on", "at", "of", "and", "then", "it", "them", "all",
             "from", "into", "onto", "is", "are", "i", "you", "my", "me", "what", "where", "how", "why",
             "can", "do", "go", "some", "here", "there", "this", "that", "again", "please", "now", "not",
-            "no", "yes", "be", "so", "or", "but", "for", "up", "down", "out", "off", "over", "under"));
+            "no", "yes", "be", "so", "or", "but", "for", "up", "down", "out", "off", "over", "under",
+            // Conversation the app picks a command out of ("I said go south"), not game words.
+            "said", "says", "took", "told", "tell", "meant", "mean", "need", "needed", "want", "know", "think",
+            "didn't", "don't", "why", "about", "just", "well", "they", "hey", "okay", "ok", "let's", "how"));
 
     static {
         String[][] pairs = {
@@ -59,12 +72,15 @@ public final class SpeechMatcher {
     private SpeechMatcher() { }
 
     /**
-     * Returns the alternative that best fits the vocabulary, already corrected.
+     * Returns the alternative that best fits the vocabulary, already corrected: fewest unknown
+     * words, then most words naming things the player can see, then fewest changes.
      * The first alternative wins ties, since the recognizer ranks them.
      */
     public static String choose(List<String> alternatives, Vocabulary vocabulary) {
         String best = null;
         int bestUnknown = Integer.MAX_VALUE;
+        int bestVisible = -1;
+        int bestAppOnly = Integer.MAX_VALUE;
         int bestChanges = Integer.MAX_VALUE;
         if (alternatives == null) {
             return "";
@@ -77,9 +93,23 @@ public final class SpeechMatcher {
             String corrected = correct(alternative, vocabulary, counts);
             int unknown = counts[0];
             int changes = counts[1];
-            if (unknown < bestUnknown || unknown == bestUnknown && changes < bestChanges) {
+            int visible = 0;
+            int appOnly = 0;
+            for (String word : corrected.split(" ")) {
+                if (vocabulary.isVisible(word)) {
+                    visible++;
+                }
+                if (!NEVER_CHANGE.contains(word) && word.length() > 1 && !vocabulary.isGameWord(word)) {
+                    appOnly++;
+                }
+            }
+            if (unknown < bestUnknown || unknown == bestUnknown && (visible > bestVisible
+                    || visible == bestVisible && (appOnly < bestAppOnly
+                    || appOnly == bestAppOnly && changes < bestChanges))) {
                 best = corrected;
                 bestUnknown = unknown;
+                bestVisible = visible;
+                bestAppOnly = appOnly;
                 bestChanges = changes;
             }
         }

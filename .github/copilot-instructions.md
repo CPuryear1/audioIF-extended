@@ -48,7 +48,10 @@ An Android app for playing interactive fiction (Z-machine games such as Zork) by
 
 ## Design notes and gotchas
 - Rooms are identified by name plus `#` and the location object (global 0, read from the state vector), because Zork reuses room names such as "Clearing" and "Forest". Speak only the name (`HintAdvisor.roomName`).
-- Zork's map isn't symmetric. Routes use only exits that the replay actually tried. Guessed reverse exits (`CommandSession.guessedExits`) are left out of the hint routes.
+- Zork's map isn't symmetric. Routes use only exits that the replay actually tried. Guessed reverse exits (`CommandSession.guessedExits`) are left out of the hint routes, and `CommandSession.route` uses them only when no route of confirmed exits exists.
+- Zork's Loud Room echoes "word word ..." for every non-movement command, which players hear as a stuck loop. `CommandSession.runCommand` adds `ECHO_NOTE` (say "echo" or leave).
+- Hint skips are saved next to the auto-save (`AutoSave.saveHintSkips`, `CommandSession.hintSkips`/`restoreHintSkips`); the session holds them until the `HintAdvisor` finishes loading.
+- `SpeechMatcher.choose` ranks alternatives by fewest unknown words, then most words for visible things, then fewest app-only words (such as "road", a landmark word Zork doesn't know), then fewest changes.
 - ZMPP's random generator isn't saved in snapshots, so exploring or retrying changes later random events. The replay retries failed steps from earlier snapshots.
 - "help" describes the current situation (`CommandSession.situation`: room, visible things, exits, things to try); "hint" gives walkthrough hints; "how do I play" reads the guide. Fetch walkthroughs before building an APK for the phone, or hints are missing.
 - Some walkthrough goals become impossible (Zork I's broken egg is a different object). `HintAdvisor.skipHintedIfStuck` skips a goal when the hinted command gets an "already…" reply but the state doesn't match.
